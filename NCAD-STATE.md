@@ -245,8 +245,19 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
   (try/catch + isContextLost → PNG fallback); **floating-BC warn** (a default support/load on a
   bbox face a rounded/recessed part doesn't reach = fixed/loaded pure void → meaningless
   ~1e8-compliance result that otherwise reported as a clean pass); IGES dropped; `/api/upload`
-  Content-Length parse guarded. Demo jobs left: upl-stl/upl-step/upl-browser, t-ok, smoke-frame,
-  bones-demo-r6/r7 (deletable).
+  Content-Length parse guarded.
+
+## DONE 2026-07-07 (session 5b): 3D click-to-pick + workspace cleanup
+- **3D click-to-pick** (index.html GLV, commit 52a0866 + fixes 23dbc18): a pick toolbar (rotate /
+  keep-solid / preserve / keep-void) in the WebGL view. A click (vs a drag) unprojects the pixel
+  through the inverse MVP (`invMat`+`mulV`), ray-casts (Möller–Trumbore over the CPU-kept `geomV`)
+  to the nearest triangle, snaps the hit to the nearest bbox face (`FACE_BOX`), and appends a
+  keep-region to the recipe's live `S.editRegions` (shown with the face highlighted, editable,
+  applied on the LLM-free revision). Makes upload→constrain→redesign click-driven. Codex-reviewed:
+  3 fixes — sync GLV tool on stage rebuild, reset geometry on `mount()` (no stale-mesh pick during
+  load), exclude pan gestures (`!drag.pan`) from picking. Verified live (top→solid, floor→preserve).
+- **Cleanup:** trashed the demo/test jobs to ~/.Trash (upl-*, t-ok, smoke-frame, bones-demo-r6/r7),
+  killed a 37h-wedged agentcad process. Repo (branch main) is at commit 23dbc18, local-only (no remote).
 
 ## PENDING — leftover
 Parametric "measured lock rows" from the guided finalize flow are only partially served
