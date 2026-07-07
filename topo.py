@@ -29,6 +29,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import proj3d
 from scipy import ndimage
 from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import cg, spsolve
@@ -142,12 +143,46 @@ def is_watertight(faces):
     return bool(np.all(counts == 2))
 
 
+def _pixel_map(ax, fig, dims):
+    """Slice 14 pixel-map contract. Projects world (mm) points to NORMALIZED image
+    coordinates (u,v) ∈ [0,1] with origin at the TOP-LEFT of the PNG — resolution- and
+    CSS-scale-independent, so the client scales by the displayed <img> size. The camera
+    is fixed (elev/azim), so the projection is deterministic. Returns a dict the client
+    overlays as SVG leader lines + labels; see index.html drawCallouts()."""
+    Lx, Ly, Lz = dims
+    M = ax.get_proj()                                    # valid after fig.canvas.draw()
+    inv = fig.transFigure.inverted()
+
+    def uv(x, y, z):
+        xp, yp, _ = proj3d.proj_transform(x, y, z, M)
+        dx, dy = ax.transData.transform((xp, yp))        # display px (bottom-left origin)
+        u, v = inv.transform((dx, dy))                   # figure fraction (bottom-left)
+        return [round(float(u), 4), round(float(1.0 - v), 4)]   # → top-left origin
+
+    m = 0.10 * max(Lx, Ly, Lz)                           # float dim lines just off the box
+    spans = [("x", "L", Lx, (0, -m, -m), (Lx, -m, -m)),
+             ("y", "W", Ly, (Lx + m, 0, -m), (Lx + m, Ly, -m)),
+             ("z", "H", Lz, (Lx + m, -m, 0), (Lx + m, -m, Lz))]
+    corners = [(x, y, z) for x in (0, Lx) for y in (0, Ly) for z in (0, Lz)]
+    return {
+        "space": "normalized", "origin": "top-left", "units": "mm",
+        "camera": {"elev": 24, "azim": -58}, "domain_mm": [Lx, Ly, Lz],
+        "bbox": [{"world": [x, y, z], "uv": uv(x, y, z)} for (x, y, z) in corners],
+        "dims": [{"axis": a, "label": lb, "mm": round(float(mm), 2),
+                  "world": [list(p0), list(p1)], "uv": [uv(*p0), uv(*p1)],
+                  "mid_uv": uv((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2,
+                              (p0[2] + p1[2]) / 2)}
+                 for (a, lb, mm, p0, p1) in spans],
+    }
+
+
 def render_iso(verts, faces, dims, path, title, silhouette=None,
-               color="#7ba7c9", edge="none", edge_lw=0.0):
+               color="#7ba7c9", edge="none", edge_lw=0.0, map_path=None):
     """One 3D frame from a FIXED camera with FIXED axis limits, so the
     structure visibly evolves in place across iteration frames. `color`/`edge`
     come from the active style's palette (edge shows only when edge_lw>0 — used
-    by the faceted mesh finish)."""
+    by the faceted mesh finish). If `map_path` is set, also writes the Slice 14
+    pixel-map sidecar (world→image projection) beside the PNG."""
     Lx, Ly, Lz = dims
     fig = plt.figure(figsize=(8, 6), facecolor="#111")
     ax = fig.add_subplot(projection="3d", facecolor="#111")
@@ -167,7 +202,9 @@ def render_iso(verts, faces, dims, path, title, silhouette=None,
         ins.set_title("side x-ray", color="#888", fontsize=7)
         ins.axis("off")
     fig.suptitle(title, color="#ddd", fontsize=10)
-    fig.savefig(path, dpi=95)
+    fig.savefig(path, dpi=95)                             # also forces a draw
+    if map_path is not None:                              # Slice 14 pixel-map sidecar
+        Path(map_path).write_text(json.dumps(_pixel_map(ax, dims=dims, fig=fig), indent=1))
     plt.close(fig)
 
 
@@ -199,27 +236,109 @@ def symmetrize(x, mode):
     return x
 
 
-def gyroid_infill(solid, dims, cell_mm, skin_vox=2):
-    """S6 feature language 'lattice': hollow the SOLID interior with a gyroid TPMS
-    lattice while keeping a solid outer skin — the printed-light 'solid skin +
-    exposed lattice windows' look. Returns the perforated bool mask (still one
-    connected body via the skin). solid: bool (nx,ny,nz)."""
-    nx, ny, nz = solid.shape
+def _tpms_field(kind, kx1, ky1, kz1):
+    """Implicit field g(x,y,z) for a triply-periodic minimal surface, evaluated on
+    broadcast 1-D wave arrays kx1=(k*x)[nx,1,1], ky1=(k*y)[1,ny,1], kz1=(k*z)[1,1,nz]
+    (numpy broadcasts the products up to the full grid — no meshgrid materialized).
+    The zero level set {g=0} is the minimal surface; g>0 is one labyrinth, |g|<iso a
+    thin double-wall sheet. Period along each axis = 2π/k = the cell size."""
+    sx, cx = np.sin(kx1), np.cos(kx1)
+    sy, cy = np.sin(ky1), np.cos(ky1)
+    sz, cz = np.sin(kz1), np.cos(kz1)
+    if kind == "schwarz_p":
+        return cx + cy + cz
+    if kind == "diamond":                                # Schwarz D
+        return sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz
+    return sx * cy + sy * cz + sz * cx                    # gyroid (default)
+
+
+def _fine_grid(dims, cell_mm, vpc, max_vox):
+    """Choose an independent fine voxel grid for lattice evaluation: `vpc` voxels
+    per cell, uniformly coarsened only if it would exceed the memory budget. The
+    lattice MUST be resolved on its own grid (not the coarse SIMP grid) — that is the
+    whole reason the old coarse `g>0` hack pinched thin walls to single voxels and went
+    non-manifold. Returns (fnx,fny,fnz, h, eff_vpc) or None if the cell is too fine to
+    keep a manifold wall inside the budget."""
     Lx, Ly, Lz = dims
-    xs = (np.arange(nx) + 0.5) * Lx / nx
-    ys = (np.arange(ny) + 0.5) * Ly / ny
-    zs = (np.arange(nz) + 0.5) * Lz / nz
-    X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
-    k = 2 * np.pi / max(cell_mm, 1e-6)
-    g = (np.sin(k * X) * np.cos(k * Y) + np.sin(k * Y) * np.cos(k * Z)
-         + np.sin(k * Z) * np.cos(k * X))
-    # ONE gyroid labyrinth (g>0) — a thick interconnected SOLID network, not a thin
-    # |g|<t shell. A solid region stays manifold through marching-cubes (watertight),
-    # where thin walls pinch to single voxels and go non-manifold.
-    net = g > 0.0
-    interior = ndimage.binary_erosion(solid, iterations=max(1, skin_vox))
-    skin = solid & ~interior                       # keep the boundary shell solid
-    return solid & (skin | net)
+    cell = max(float(cell_mm), 1e-3)
+    h = cell / max(vpc, 6)
+    res = lambda hh: tuple(max(1, int(round(L / hh))) for L in (Lx, Ly, Lz))
+    fnx, fny, fnz = res(h)
+    while fnx * fny * fnz > max_vox:
+        h *= 1.26                                        # ~2x volume budget per step
+        fnx, fny, fnz = res(h)
+    eff_vpc = cell / h
+    if eff_vpc < 5.0:                                    # walls would be < ~2 voxels → bail
+        return None
+    return fnx, fny, fnz, h, eff_vpc
+
+
+def tpms_lattice(solid, dims, cell_mm, kind="gyroid", mode="sheet",
+                 wall_mm=None, skin_mm=None, vpc=10, max_vox=10_000_000):
+    """Real TPMS / periodic lattice primitive. Infills the optimized `solid` (coarse
+    bool, nx,ny,nz) with a lattice evaluated on its OWN fine grid, then keeps a solid
+    outer skin so the struts anchor into a shell and the body stays one connected,
+    watertight solid. Watertight BY CONSTRUCTION: the fine grid guarantees every wall
+    is ≥ ~3 voxels, so marching-cubes never sees the single-voxel pinch that made the
+    coarse hack non-manifold.
+
+    kind  : 'gyroid' | 'schwarz_p' | 'diamond'  (smooth TPMS)
+            'ribs'    → cross-hatched internal stiffening walls (2-axis)
+            'tracery' → cubic strut skeleton along cell edges (gothic openwork)
+    mode  : 'sheet'   → |g|<iso  thin double-wall (stiff, light — the printed default)
+            'network' → g>0      solid ligament labyrinth (chunkier)
+    Returns (body_bool_fine, fine_h_xyz, info) or (None, None, info) if it can't be
+    made printable at the memory budget (caller then ships the plain solid)."""
+    Lx, Ly, Lz = dims
+    grid = _fine_grid(dims, cell_mm, vpc, max_vox)
+    if grid is None:
+        return None, None, {"reason": "cell too fine for domain at memory budget"}
+    fnx, fny, fnz, h, eff_vpc = grid
+    cell = max(float(cell_mm), 1e-3)
+
+    # occupancy on the fine grid: trilinear upsample of the blocky coarse solid
+    nx, ny, nz = solid.shape
+    occ = ndimage.zoom(solid.astype(np.float32), (fnx / nx, fny / ny, fnz / nz),
+                       order=1) >= 0.5
+    if not occ.any():
+        return None, None, {"reason": "empty after resample"}
+
+    k = 2 * np.pi / cell
+    kx1 = (k * (np.arange(fnx) + 0.5) * Lx / fnx).reshape(fnx, 1, 1)
+    ky1 = (k * (np.arange(fny) + 0.5) * Ly / fny).reshape(1, fny, 1)
+    kz1 = (k * (np.arange(fnz) + 0.5) * Lz / fnz).reshape(1, 1, fnz)
+
+    if kind in ("ribs", "tracery"):
+        # thin periodic walls: |sin(k·axis)| < s  ⇒  planes every half-cell.
+        s = np.sin(np.pi * min(max((wall_mm or 3.5 * h), 3.0 * h), 0.45 * cell) / cell)
+        wx = np.abs(np.sin(kx1)) < s
+        wy = np.abs(np.sin(ky1)) < s
+        if kind == "ribs":
+            lat = wx | wy                                # 2-axis stiffening grid
+        else:
+            wz = np.abs(np.sin(kz1)) < s
+            lat = (wx & wy) | (wy & wz) | (wx & wz)      # struts along cell edges
+    else:
+        g = _tpms_field(kind, kx1, ky1, kz1)
+        if mode == "network":
+            lat = g > 0.0
+        else:                                            # sheet: |g|<iso, wall ≈ 2·iso/k
+            w = max((wall_mm or 0.16 * cell), 3.0 * h)   # ≥3 fine voxels (printable floor)
+            lat = np.abs(g) < 0.5 * k * w
+
+    # solid skin so the lattice is enclosed and connected to the boundary
+    sk = max((skin_mm or 0.06 * min(Lx, Ly, Lz)), 2.0 * h)
+    skin_vox = max(1, int(round(sk / h)))
+    interior = ndimage.binary_erosion(occ, iterations=skin_vox)
+    body = occ & ((occ & ~interior) | lat)
+
+    lb, nn = ndimage.label(body)                          # drop stray lattice islands
+    if nn > 1:
+        body = lb == (np.argmax(np.bincount(lb.ravel())[1:]) + 1)
+    return body, (Lx / fnx, Ly / fny, Lz / fnz), {
+        "kind": kind, "mode": mode, "cell_mm": round(cell, 3),
+        "eff_vpc": round(eff_vpc, 1), "fine_res": [fnx, fny, fnz],
+        "skin_vox": int(skin_vox), "solid_fraction": round(float(body.mean()), 4)}
 
 
 def taubin_smooth(verts, faces, iters=12, lam=0.5, mu=-0.53):
@@ -262,8 +381,10 @@ def main():
     symmetry = cfg.get("symmetry", "none")      # S3: enforced each iteration
     z_bias = float(cfg.get("z_bias", 1.0))      # S3: >1 biases toward vertical members
     mesh_finish = cfg.get("mesh_finish", "as-is")  # S5: final-mesh smooth vs faceted
-    lattice = bool(cfg.get("lattice"))          # S6: gyroid infill (Lattice/Gyroid style)
+    lattice = bool(cfg.get("lattice"))          # S6: TPMS/periodic infill (Lattice/Gothic)
     lattice_cell = cfg.get("lattice_cell")      # mm; None → auto
+    lattice_kind = cfg.get("lattice_kind", "gyroid")   # gyroid|schwarz_p|diamond|ribs|tracery
+    lattice_mode = cfg.get("lattice_mode", "sheet")    # sheet (thin double-wall) | network (ligaments)
 
     nele = nx * ny * nz
     ndof = 3 * (nx + 1) * (ny + 1) * (nz + 1)
@@ -390,44 +511,50 @@ def main():
         solid = lab == keep
     hx, hy, hz = Lx / nx, Ly / ny, Lz / nz
 
-    def largest(mask):
-        lb, nn = ndimage.label(mask)
-        return (lb == (np.argmax(np.bincount(lb.ravel())[1:]) + 1)) if nn > 1 else mask, nn
-
-    # S6 lattice is BEST-EFFORT: a gyroid carved into a thin optimized structure can
-    # go non-manifold (unprintable). Try it; keep it only if the mesh stays watertight,
-    # otherwise ship the solid — a styled part is never a broken STL.
+    # ---- real TPMS / periodic lattice, evaluated on its own FINE grid so it's
+    # watertight by construction. Still BEST-EFFORT: if it somehow can't be made a
+    # closed manifold, ship the plain solid — a styled part is never a broken STL.
     lattice_applied = False
-    body = solid
+    lattice_info = None
+    fine_mesh = None
     if lattice and solid.any():
-        cell = float(lattice_cell) if lattice_cell else max(min(Lx, Ly, Lz) / 5.0,
-                                                            4 * max(hx, hy, hz))
-        latt, _ = largest(gyroid_infill(solid, (Lx, Ly, Lz), cell, skin_vox=1))
-        tv, tf, _, _ = measure.marching_cubes(np.pad(latt.astype(float), 1), 0.5, spacing=(hx, hy, hz))
-        if is_watertight(tf):
-            body, lattice_applied = latt, True
-    solid = body
-    if solid.any():                                   # marching_cubes needs the level
-        pad = np.pad(solid.astype(float), 1)          # inside the data range — an empty
+        cell = (float(lattice_cell) if lattice_cell
+                else max(min(Lx, Ly, Lz) / 6.0, 8 * max(hx, hy, hz)))
+        body, fh, lattice_info = tpms_lattice(solid, (Lx, Ly, Lz), cell,
+                                              kind=lattice_kind, mode=lattice_mode)
+        if body is not None and body.any():
+            fhx, fhy, fhz = fh
+            tv, tf, _, _ = measure.marching_cubes(np.pad(body.astype(np.float32), 1),
+                                                  0.5, spacing=(fhx, fhy, fhz))
+            if len(tf) and is_watertight(tf):
+                tv -= [fhx * 0.5, fhy * 0.5, fhz * 0.5]
+                fine_mesh, lattice_applied = (tv, tf), True
+
+    if fine_mesh is not None:                         # lattice mesh: do NOT smooth — it
+        verts, faces = fine_mesh                      # would erase the thin walls; the
+    elif solid.any():                                 # fine grid already reads continuous
+        pad = np.pad(solid.astype(float), 1)          # plain-solid path (coarse grid)
         verts, faces, _, _ = measure.marching_cubes(pad, 0.5, spacing=(hx, hy, hz))
         verts -= [hx * 0.5, hy * 0.5, hz * 0.5]       # unpad + half-voxel (cell-centered)
+        if mesh_finish in ("smooth", "g2-polish") and len(faces):   # S5: polish staircase
+            verts = taubin_smooth(verts, faces, iters=16 if mesh_finish == "g2-polish" else 8)
     else:                                             # degenerate (no material) → empty mesh
         verts, faces = np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
-    if mesh_finish in ("smooth", "g2-polish") and len(faces):    # S5: polish the staircase
-        verts = taubin_smooth(verts, faces, iters=16 if mesh_finish == "g2-polish" else 8)
     write_stl(out / "result.stl", verts, faces)
     render_iso(verts, faces, (Lx, Ly, Lz), out / "final.png",
                f"final  compliance {comp:.3f}  vol {x.mean():.3f}", color=rcol, edge=ecol,
-               edge_lw=0.25 if mesh_finish == "faceted" else 0.0)
+               edge_lw=0.25 if mesh_finish == "faceted" else 0.0,
+               map_path=out / "final.map.json")           # Slice 14 pixel-map contract
     watertight = bool(len(faces)) and is_watertight(faces)
     result = {
         "iterations": it, "compliance": comp, "vol_fraction": float(x.mean()),
         "solid_fraction_after_threshold": float(solid.mean()),
         "components": int(n), "kept_largest": bool(n > 1),
         "watertight": watertight, "lattice_applied": bool(lattice_applied),
+        "lattice": lattice_info,
         "mesh_volume_mm3": mesh_volume(verts, faces) if watertight else None,
         "domain_mm": [Lx, Ly, Lz], "resolution": [nx, ny, nz],
-        "stl": "result.stl", "final_png": "final.png",
+        "stl": "result.stl", "final_png": "final.png", "final_map": "final.map.json",
     }
     (out / "result.json").write_text(json.dumps(result, indent=1))
     print(json.dumps({"done": True, **result}), flush=True)

@@ -13,3 +13,6 @@ __pycache__/
 
 # per-run scratch (jobs live in ~/Documents/CAD/<project>/, outside this repo)
 topo-config.json
+
+# server runtime log (created by the `ncad` launcher)
+server.log

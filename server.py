@@ -709,8 +709,13 @@ def run_structural_job(job, proj):
     if mesh_finish != "as-is":
         cfg["mesh_finish"] = mesh_finish           # S5: smooth vs faceted final mesh
     features = (style.get("feature_language") or []) if style else []
-    if "lattice" in features:
-        cfg["lattice"] = True                      # S6: gyroid infill (Lattice/Gyroid)
+    # S6 structural infill: map the style's feature tokens to a fine-grid lattice kind.
+    # tracery (gothic openwork) wins over a plain lattice; ribs are the coarse fallback.
+    lat_kind = next((k for tok, k in (("tracery", "tracery"), ("lattice", "gyroid"),
+                                      ("ribs", "ribs")) if tok in features), None)
+    if lat_kind:
+        cfg["lattice"] = True                      # topo.py evaluates it on its own fine grid
+        cfg["lattice_kind"] = lat_kind
     if style:
         cfg["palette"] = style.get("palette")      # S1: recolor the render (normalized → always present)
     with LOCK:
@@ -789,9 +794,15 @@ def run_structural_job(job, proj):
           "step": None, "viewer": None, "error": None,
           "feedback": "\n".join(f"- {p}" for p in problems) or None}
     record_iter(job, it)
-    if cfg.get("lattice") and not final.get("lattice_applied"):   # honest: the gyroid
-        log(job, "note: gyroid lattice couldn't stay printable on this structure "
-                 "— shipped solid instead (lattice needs a bulkier body)")
+    li = final.get("lattice")
+    if final.get("lattice_applied") and li:
+        log(job, f"lattice: {li['kind']}"
+                 + (f" {li['mode']}" if li.get('mode') else "")
+                 + f" · cell {li['cell_mm']}mm · {li['eff_vpc']} vox/cell "
+                 f"· solid frac {li['solid_fraction']}")
+    elif cfg.get("lattice") and not final.get("lattice_applied"):   # honest fallback
+        log(job, f"note: {cfg.get('lattice_kind', 'lattice')} infill couldn't be made "
+                 "watertight on this structure — shipped solid instead")
     if problems:
         log(job, "finished with warnings: " + "; ".join(problems))
         set_state(job, "failed")

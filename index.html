@@ -176,6 +176,13 @@
   .viewport .pinned{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:11px;
                     background:rgba(79,195,247,.16);color:var(--cool);border:1px solid var(--cool);
                     border-radius:999px;padding:4px 11px;animation:pulse 1.3s infinite}
+  /* Slice 14: on-PNG dimension callouts (SVG overlay; coords from the render's pixel-map sidecar) */
+  .viewport .callouts{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+  .viewport .callouts .wire{stroke:rgba(150,162,196,.35);stroke-width:1;fill:none}
+  .viewport .callouts .lead{stroke:#ffd23c;stroke-width:2;fill:none}
+  .viewport .callouts .tick{fill:#ffd23c}
+  .viewport .callouts .lbl{fill:#ffe680;font:600 12px var(--mono);paint-order:stroke;stroke:#0a0d12;stroke-width:3px;stroke-linejoin:round}
+  .viewport .callouts .lbu{fill:#9aa4bf;font:500 9px var(--mono);paint-order:stroke;stroke:#0a0d12;stroke-width:3px}
   /* revision compare: structural = draggable wipe (fixed camera registers), parametric = side-by-side */
   .cmp{position:absolute;inset:0}
   .cmp img.cmp-base,.cmp img.cmp-cur{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
@@ -284,7 +291,7 @@ const STAGE_TEXT = { configuring:"configuring the design…", generating:"writin
 const S = { jobs:[], status:{active:null,queue:[],now:0}, statusAt:0,
   sel:null, selIter:null, session:null, mode:"empty",
   expanded:{}, stageKind:null, stageJob:null, dockKey:null, film:{}, play:null, vfront:"A", compare:false,
-  styles:null };
+  dims:false, maps:{}, styles:null };
 /* aesthetic style presets (loaded once) + lookup for the job's chosen style */
 async function loadStyles(){ try{ const r=await fetch("/api/styles"); S.styles=await r.json(); }catch(e){} }
 function styleKey(j){ return (j&&j.config&&j.config.style)||(j&&j.style)||null; }
@@ -691,10 +698,12 @@ function mountJob(j){
   $("#stage").innerHTML =
     '<div class="jobhead"><span class="jn" id="jName"></span><span class="badge" id="jBadge"></span>'+
     '<span class="stylepill" id="jStyle" style="display:none"></span>'+
-    '<span class="spacer"></span><button class="ghost" id="jCmp" style="display:none">⇔ compare</button>'+
+    '<span class="spacer"></span><button class="ghost" id="jDims" style="display:none">⊹ dims</button>'+
+    '<button class="ghost" id="jCmp" style="display:none">⇔ compare</button>'+
     '<button class="ghost" id="jCancel">✕ cancel</button></div>'+
     '<div class="viewport"><img id="jImgA" class="vlayer" alt="" style="opacity:1">'+
       '<img id="jImgB" class="vlayer" alt="" style="opacity:0">'+
+      '<svg id="jCallouts" class="callouts" style="display:none"></svg>'+
       '<div class="cmp" id="jCompare" style="display:none"></div>'+
       '<div class="wash" id="jWash" style="display:none"><span class="sp"></span><span id="jWashT"></span></div>'+
       '<div class="pinned" id="jPin" style="display:none">● pinned — jump to live</div></div>'+
@@ -710,6 +719,7 @@ function mountJob(j){
   $("#jPin").onclick = ()=>{ S.selIter=null; stopPlay(); updateJob(selected()); };
   $("#jPlay").onclick = togglePlay;
   $("#jCmp").onclick = ()=>{ S.compare=!S.compare; updateJob(selected()); };
+  $("#jDims").onclick = ()=>{ S.dims=!S.dims; updateJob(selected()); };
 }
 /* cross-fade the viewport to a new frame url (fixed camera ⇒ registers in place) */
 function showFrame(url){
@@ -771,6 +781,59 @@ function updateJob(j){
   renderCompare(j, base, canCmp);
   const dl=$("#jCmpDelta");
   if(dl){ if(S.compare&&canCmp){ dl.style.display=""; dl.innerHTML=compareDelta(j,base); } else dl.style.display="none"; }
+
+  // Slice 14: dimension callouts (structural only; compare owns the viewport when active)
+  const canDims = j.generator==="structural" && !RUNNING.has(j.state) && !!finalFrame(j) && !S.compare;
+  const dimsBtn=$("#jDims");
+  if(dimsBtn){ dimsBtn.style.display = canDims?"":"none";
+    dimsBtn.textContent = (S.dims&&canDims)?"✕ dims":"⊹ dims"; }
+  renderCallouts(j);
+}
+/* Slice 14: draw the pixel-map callouts. The renderer writes a sidecar (final.map.json)
+   with world→image points as NORMALIZED (u,v) top-left fractions; we map those onto the
+   letterboxed (object-fit:contain) image rect so the overlay registers at any size. */
+async function renderCallouts(j){
+  const svg=$("#jCallouts"); if(!svg) return;
+  const shown=shownIter(j);                             // callouts only on the final frame
+  if(!(S.dims && j && j.generator==="structural" && !S.compare && !RUNNING.has(j.state)
+       && finalFrame(j) && shown && shown.label==="final")){
+    svg.style.display="none"; svg.innerHTML=""; return; }
+  let m=S.maps[j.id];
+  if(m===undefined){                                    // fetch the sidecar once per job
+    S.maps[j.id]=null;
+    try{ const url="/files/"+finalFrame(j).preview.replace(/\.png$/,".map.json")+"?t="+j.updated;
+      const r=await fetch(url); if(r.ok) S.maps[j.id]=await r.json(); }catch(e){}
+    if(selected()!==j) return;                          // selection moved while awaiting
+    m=S.maps[j.id];
+  }
+  paintCallouts(j, m);
+}
+function paintCallouts(j, m){
+  const svg=$("#jCallouts"), vp=$(".viewport"); if(!svg||!vp) return;
+  const shown=shownIter(j);
+  if(!(m && m.dims && S.dims && !S.compare && shown && shown.label==="final")){
+    svg.style.display="none"; return; }
+  const R=vp.getBoundingClientRect();
+  const front=$("#jImg"+(S.vfront==="B"?"B":"A"));
+  const nAsp=(front&&front.naturalWidth&&front.naturalHeight)? front.naturalWidth/front.naturalHeight : 760/570;
+  let w,h,left,top;                                     // the contained (letterboxed) image rect
+  if(R.width/R.height > nAsp){ h=R.height; w=h*nAsp; left=(R.width-w)/2; top=0; }
+  else { w=R.width; h=w/nAsp; left=0; top=(R.height-h)/2; }
+  const px=uv=>[left+uv[0]*w, top+uv[1]*h], f=n=>n.toFixed(1);
+  let s="";
+  (m.bbox||[]).forEach((a,i)=>(m.bbox||[]).slice(i+1).forEach(b=>{     // faint bbox wireframe
+    let same=0; for(let t=0;t<3;t++) if(a.world[t]===b.world[t]) same++;
+    if(same===2){ const p=px(a.uv),q=px(b.uv);
+      s+='<line class="wire" x1="'+f(p[0])+'" y1="'+f(p[1])+'" x2="'+f(q[0])+'" y2="'+f(q[1])+'"/>'; }
+  }));
+  for(const d of m.dims){                               // dimension leaders + labels
+    const p=px(d.uv[0]), q=px(d.uv[1]), mid=px(d.mid_uv);
+    s+='<line class="lead" x1="'+f(p[0])+'" y1="'+f(p[1])+'" x2="'+f(q[0])+'" y2="'+f(q[1])+'"/>';
+    s+='<circle class="tick" cx="'+f(p[0])+'" cy="'+f(p[1])+'" r="3"/><circle class="tick" cx="'+f(q[0])+'" cy="'+f(q[1])+'" r="3"/>';
+    s+='<text class="lbl" x="'+f(mid[0])+'" y="'+f(mid[1])+'" text-anchor="middle">'+esc(d.label)+' '+esc(String(d.mm))+'</text>';
+    s+='<text class="lbu" x="'+f(mid[0])+'" y="'+f(mid[1]+11)+'" text-anchor="middle">mm</text>';
+  }
+  svg.innerHTML=s; svg.style.display="";
 }
 /* the natural baseline for a variant/revision is its root (original) job */
 function baselineJob(j){
@@ -948,6 +1011,11 @@ document.addEventListener("keydown",e=>{
   const sel=$("#jFilm")&&$("#jFilm").querySelector(".fr.sel");
   if(sel&&sel.scrollIntoView) sel.scrollIntoView({inline:"center",block:"nearest"});
 });
+/* the callout overlay is drawn in viewport pixels → re-register it on resize (from cache) */
+let _rzT=null;
+window.addEventListener("resize",()=>{ clearTimeout(_rzT); _rzT=setTimeout(()=>{
+  if(S.dims&&S.mode==="job"){ const j=selected(); if(j) paintCallouts(j, S.maps[j.id]); }
+},80); });
 
 /* ---------- DOCK: recipe + metrics + log ---------- */
 function renderDock(kind){

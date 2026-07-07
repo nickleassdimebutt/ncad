@@ -6,6 +6,9 @@ is the LOCAL model (qwen3.6-35b via LM Studio) used ONLY to configure/interpret;
 ALL geometry is deterministic. One GPU → jobs run strictly serial.
 
 ## Locations & commands
+- GIT: `~/Documents/CAD/genloop/` is now a git repo (branch `main`, initial commit
+  `a4f815f`, 2026-07-06). Source only (.gitignore excludes .venv/__pycache__/.bak/
+  .DS_Store). No remote. COMMIT future changes here (was un-versioned before this).
 - App dir: `~/Documents/CAD/genloop/` — `server.py` (Python stdlib HTTP, port 8765),
   `index.html` (single-file vanilla JS/CSS UI), `topo.py` (SIMP solver),
   `templates/` (parametric templates + manifest.json).
@@ -133,6 +136,8 @@ DETERMINISTIC stack. LLM picks it once at the gate (synthesize_spec returns
 - Demo job `bones-demo` left in the workspace (a real bone-like styled result).
 - NOT built (S6): feature_language (ribs/flutes/pockets/taper) + lattice/gyroid/tracery
   (need a cell/void primitive) — deferred per Nick's "defer tail" choice.
+  [UPDATE session 4: lattice/gyroid/ribs/tracery NOW BUILT as a real fine-grid TPMS
+  primitive; see "DONE 2026-07-06 (session 4)" below.]
 
 ## DONE 2026-07-06 (session 3b): S6 feature language + solver speedup
 - **S6 feature_language** (per-style geometry ops, gated like edges on fresh/restyle):
@@ -164,12 +169,47 @@ DETERMINISTIC stack. LLM picks it once at the gate (synthesize_spec returns
   for install + rebuild recipe. topo.py `cho_factor(Kf).solve(b)` fresh each iter,
   falls back to spsolve(MMD_AT_PLUS_A)→CG. Multithreaded, exact, Fine no longer needs CG.
 
+## DONE 2026-07-06 (session 4): real TPMS lattice primitive + Slice 14 pixel-map callouts
+- **Real TPMS lattice** (topo.py) — replaced the dormant coarse-grid `gyroid_infill`
+  (which evaluated `g>0` on the ~8k SIMP grid → thin walls pinched to single voxels →
+  non-manifold → ALWAYS fell back to solid) with `tpms_lattice()`, evaluated on its
+  OWN fine grid via `_fine_grid()` (vpc≈10 voxels/cell, uniformly coarsened only to a
+  `max_vox`=10M budget; bails if a cell can't hold a ≥~3-voxel wall). Watertight BY
+  CONSTRUCTION — the fine grid guarantees no single-voxel pinch. `_tpms_field()` does
+  gyroid / schwarz_p / diamond (Neovius dropped: its steep gradient can't reliably
+  close a sheet); modes `sheet` (|g|<iso double-wall) / `network` (g>0 ligaments);
+  plus non-TPMS `ribs` (2-axis stiffening walls) and `tracery` (cubic edge struts) so
+  gothic/maker-honest are unblocked too. Keeps a solid skin (struts anchor into a
+  shell → one connected body) + largest-component filter. main() marches the FINE body
+  and keeps the lattice mesh ONLY if `is_watertight` (so `lattice_applied` can never be
+  a false positive); else ships the plain solid. Lattice mesh is NOT taubin-smoothed
+  (would erase thin walls). Config: `lattice`, `lattice_kind`, `lattice_mode`,
+  `lattice_cell`. server.py maps style feature tokens → kind (tracery>lattice→gyroid>
+  ribs) and now logs the applied lattice stats (was a dead flag). VERIFIED: unit test
+  (thin truss + block, all kinds watertight), full solve, and LIVE via `/revise`
+  (bones-demo→lattice-gyroid, no LLM): `lattice_applied=True watertight=True`, gyroid
+  sheet cell 37.9mm, 248cm³, shown in-browser with the Lattice/Gyroid palette.
+- **Slice 14 pixel-map callouts** (topo.py render_iso + index.html) — UNBLOCKED. Camera
+  is fixed, so `_pixel_map()` projects world(mm)→NORMALIZED (u,v)∈[0,1] top-left image
+  fractions (recipe: `proj3d.proj_transform` → `ax.transData` → `fig.transFigure`inv;
+  empirically verified — red overlay Xs land on matplotlib's own 3D scatter markers).
+  Resolution/CSS-scale-independent. render_iso writes `final.map.json` beside the final
+  PNG (`{space,origin,camera,domain_mm, bbox:[8 corners{world,uv}], dims:[L/W/H
+  {world,uv,mid_uv,mm}]}`); result.json gains `final_map`. Client: a `⊹ dims` toggle on
+  structural-done jobs draws an SVG overlay (`#jCallouts`) — faint bbox wireframe + L/W/H
+  yellow leaders with mm labels — mapping the sidecar uv onto the letterboxed
+  (object-fit:contain) image rect (repaints on resize; hidden in compare / mid-iter
+  scrub). CONTRACT for future callouts (loads, faces): read the same sidecar; anything
+  needing arbitrary points can carry the 4×4 proj matrix too (not needed yet). VERIFIED
+  live in-browser (screenshot: L 160 / W 60 / H 90 leaders correctly outside the part).
+
 ## PENDING — leftover
-Slice 14 (on-PNG clickable dimension callouts) still BLOCKED on a render pixel-map
-contract — do NOT hardcode pixel rects. Parametric "measured lock rows" from the
-guided finalize flow are only partially served (labels help); the session finalize
-path itself is unchanged. Consider: force a lighter quality during Wild fan-out so
-6 solves don't cost 80 min at Fine (currently variants inherit the chosen quality).
+Parametric "measured lock rows" from the guided finalize flow are only partially served
+(labels help); the session finalize path itself is unchanged. Consider: force a lighter
+quality during Wild fan-out so 6 solves don't cost 80 min at Fine (currently variants
+inherit the chosen quality). TPMS follow-ons if wanted: graded cell size (varies with a
+field), network-mode volume-fraction targeting, and a matplotlib-independent thumbnail
+so the lattice reads brighter than the translucent-resin palette.
 
 ## (historical roadmap — now built)
 ### A. QUALITY knob (agreed)
