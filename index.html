@@ -767,7 +767,7 @@ function mountJob(j){
   $("#jDims").onclick = ()=>{ S.dims=!S.dims; updateJob(selected()); };
   $("#j3D").onclick = ()=>{ S.gl3d=!S.gl3d; if(S.gl3d)S.compare=false; if(!S.gl3d){S.pickTool=null;GLV.setTool(null);} updateJob(selected()); };
   // 3D click-to-pick: a toolbar tool + a click on a face adds a keep-region to the recipe
-  S.pickTool=null;
+  S.pickTool=null; GLV.setTool(null);                    // sync GLV's tool with the reset toolbar
   const pt=$("#jPickTools");
   if(pt) pt.querySelectorAll("button").forEach(b=>b.onclick=()=>{
     S.pickTool=b.dataset.tool||null;
@@ -1194,6 +1194,7 @@ const GLV = (function(){
     if(mounted && cv===canvas && gl && !gl.isContextLost()) return true;   // reuse a live context
     if(gl){ const ex=gl.getExtension("WEBGL_lose_context"); if(ex) ex.loseContext(); }  // free the old
     mounted=false; url0=null; gl=null;                     // new canvas ⇒ re-upload geometry
+    nTris=0; geomV=null; lastMVP=null;                     // drop stale mesh so a pick before show() no-ops
     try{                                                   // mount MUST NOT throw — degrade to PNG
     cv=canvas; gl=cv.getContext("webgl",{antialias:true,preserveDrawingBuffer:false});
     if(!gl || gl.isContextLost()){ gl=null; return false; }
@@ -1214,7 +1215,7 @@ const GLV = (function(){
       else { az-=dx*0.01; el+=dy*0.01; const L=1.5533; el=Math.max(-L,Math.min(L,el)); }
       render(); });
     const end=e=>{
-      if(drag && tool && onPickCb && drag.moved<6){       // a click (not a drag) with a tool active → pick
+      if(drag && !drag.pan && tool && onPickCb && drag.moved<6){  // a plain click (not a pan/drag) → pick
         const r=cv.getBoundingClientRect(); const p=pickAt(drag.sx-r.left, drag.sy-r.top);
         if(p) onPickCb(tool, p);
       }
