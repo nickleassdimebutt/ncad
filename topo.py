@@ -114,6 +114,19 @@ def nodes_in_box(box, nx, ny, nz):
     return np.array(ids, dtype=np.int64)
 
 
+def elements_in_box(box, nx, ny, nz):
+    """Normalized [x0,y0,z0,x1,y1,z1] box → boolean (nx,ny,nz) ELEMENT mask, by
+    element centre. Used for Phase-2 keep regions (solid/void/preserve)."""
+    x0, y0, z0, x1, y1, z1 = box
+    cx = (np.arange(nx) + 0.5) / nx
+    cy = (np.arange(ny) + 0.5) / ny
+    cz = (np.arange(nz) + 0.5) / nz
+    mx = (cx >= x0) & (cx <= x1)
+    my = (cy >= y0) & (cy <= y1)
+    mz = (cz >= z0) & (cz <= z1)
+    return mx[:, None, None] & my[None, :, None] & mz[None, None, :]
+
+
 def write_stl(path, verts, faces):
     """Binary STL from marching-cubes output."""
     tri = verts[faces]                                     # (n, 3, 3)
@@ -134,6 +147,77 @@ def mesh_volume(verts, faces):
     tri = verts[faces]
     return float(abs(np.einsum("ij,ij->i", tri[:, 0],
                                np.cross(tri[:, 1], tri[:, 2])).sum()) / 6.0)
+
+
+MAX_STL_TRIS = 2_000_000          # voxelization is pure-python per-triangle → bound the work
+
+
+def read_stl(path):
+    """Read a binary OR ASCII STL → (verts (3F,3), faces (F,3)). Phase 3: turns an
+    uploaded part into geometry we can voxelize. No dedup — per-triangle vertices."""
+    data = Path(path).read_bytes()
+    head = data[:5].lower()
+    if head == b"solid" and b"facet" in data[:2048].lower():          # ASCII
+        vs = [[float(t[1]), float(t[2]), float(t[3])]
+              for ln in data.decode("ascii", "ignore").splitlines()
+              for t in [ln.split()] if len(t) >= 4 and t[0] == "vertex"]
+        v = np.asarray(vs, float).reshape(-1, 3)
+        if len(v) // 3 > MAX_STL_TRIS:
+            raise ValueError(f"mesh too complex ({len(v) // 3} triangles, cap {MAX_STL_TRIS}) — decimate it")
+    else:                                                             # binary
+        n = struct.unpack("<I", data[80:84])[0]
+        if n > MAX_STL_TRIS:
+            raise ValueError(f"mesh too complex ({n} triangles, cap {MAX_STL_TRIS}) — decimate it")
+        rec = np.frombuffer(data[84:84 + n * 50], dtype=np.uint8)
+        if rec.size < n * 50:
+            raise ValueError("truncated STL")
+        floats = rec.reshape(n, 50)[:, :48].copy().view("<f4").reshape(n, 12)
+        v = floats[:, 3:12].reshape(n * 3, 3).astype(float)
+    if len(v) < 3:
+        raise ValueError("no triangles in STL")
+    return v, np.arange(len(v)).reshape(-1, 3)
+
+
+def voxelize_mesh(verts, faces, dims, res):
+    """Ray-parity voxelization of a watertight mesh → bool occupancy (nx,ny,nz).
+    An element centre is inside if a +z ray from it crosses an odd number of triangles
+    above it. `verts` are assumed shifted into the [0,dims] frame. Pure numpy — no deps."""
+    Lx, Ly, Lz = dims
+    nx, ny, nz = res
+    # sample slightly off cell centre so a +z ray never grazes an axis-aligned face/edge
+    # exactly (that double-counts shared edges → parity artifacts on CAD meshes).
+    xs = (np.arange(nx) + 0.5007) * Lx / nx
+    ys = (np.arange(ny) + 0.4993) * Ly / ny
+    zs = (np.arange(nz) + 0.5) * Lz / nz
+    tri = verts[faces]
+    cols = [[[] for _ in range(ny)] for _ in range(nx)]               # z-crossings per column
+    for t in tri:
+        ax, ay, az = t[0]; bx, by, bz = t[1]; cx, cy, cz = t[2]
+        i0 = max(0, int(np.floor(min(ax, bx, cx) / Lx * nx - 0.5)))
+        i1 = min(nx - 1, int(np.ceil(max(ax, bx, cx) / Lx * nx + 0.5)))
+        j0 = max(0, int(np.floor(min(ay, by, cy) / Ly * ny - 0.5)))
+        j1 = min(ny - 1, int(np.ceil(max(ay, by, cy) / Ly * ny + 0.5)))
+        if i1 < i0 or j1 < j0:
+            continue
+        det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(det) < 1e-12:
+            continue
+        for i in range(i0, i1 + 1):
+            px = xs[i]
+            for j in range(j0, j1 + 1):
+                py = ys[j]
+                w0 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / det
+                w1 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / det
+                if w0 >= 0 and w1 >= 0 and (w0 + w1) <= 1:
+                    cols[i][j].append(w0 * az + w1 * bz + (1 - w0 - w1) * cz)
+    occ = np.zeros((nx, ny, nz), bool)
+    for i in range(nx):
+        for j in range(ny):
+            zl = cols[i][j]
+            if zl:
+                zl = np.sort(np.asarray(zl))
+                occ[i, j] = ((len(zl) - np.searchsorted(zl, zs)) % 2) == 1   # odd = inside
+    return occ
 
 
 def is_watertight(faces):
@@ -274,7 +358,7 @@ def _fine_grid(dims, cell_mm, vpc, max_vox):
 
 
 def tpms_lattice(solid, dims, cell_mm, kind="gyroid", mode="sheet",
-                 wall_mm=None, skin_mm=None, vpc=10, max_vox=10_000_000):
+                 wall_mm=None, skin_mm=None, vpc=10, max_vox=10_000_000, protect=None):
     """Real TPMS / periodic lattice primitive. Infills the optimized `solid` (coarse
     bool, nx,ny,nz) with a lattice evaluated on its OWN fine grid, then keeps a solid
     outer skin so the struts anchor into a shell and the body stays one connected,
@@ -332,20 +416,33 @@ def tpms_lattice(solid, dims, cell_mm, kind="gyroid", mode="sheet",
     interior = ndimage.binary_erosion(occ, iterations=skin_vox)
     body = occ & ((occ & ~interior) | lat)
 
-    lb, nn = ndimage.label(body)                          # drop stray lattice islands
-    if nn > 1:
-        body = lb == (np.argmax(np.bincount(lb.ravel())[1:]) + 1)
+    pf = None
+    if protect is not None and protect.any():             # Phase 2: keep-solid regions
+        pf = ndimage.zoom(protect.astype(np.float32),     # stay fully solid (un-latticed)
+                          (fnx / solid.shape[0], fny / solid.shape[1], fnz / solid.shape[2]),
+                          order=1) >= 0.5
+        body = body | (occ & pf)
+
+    lb, nn = ndimage.label(body)                          # keep largest + any protected island
+    if nn > 1:                                            # (never drop a forced keep-region)
+        counts = np.bincount(lb.ravel())
+        keep = {int(np.argmax(counts[1:]) + 1)}
+        if pf is not None:
+            keep |= {int(l) for l in np.unique(lb[pf]) if l > 0}
+        body = np.isin(lb, list(keep))
     return body, (Lx / fnx, Ly / fny, Lz / fnz), {
         "kind": kind, "mode": mode, "cell_mm": round(cell, 3),
         "eff_vpc": round(eff_vpc, 1), "fine_res": [fnx, fny, fnz],
         "skin_vox": int(skin_vox), "solid_fraction": round(float(body.mean()), 4)}
 
 
-def taubin_smooth(verts, faces, iters=12, lam=0.5, mu=-0.53):
+def taubin_smooth(verts, faces, iters=12, lam=0.5, mu=-0.53, frozen=None):
     """S5: shrink-free Laplacian (Taubin λ|μ) smoothing of the marching-cubes mesh
     — turns the voxel staircase into continuous organic surfaces (Bones/Evolved).
     Connectivity (faces) is untouched, so watertightness is preserved. The λ/μ
-    pair inflates back what a plain Laplacian would shrink."""
+    pair inflates back what a plain Laplacian would shrink. `frozen` (bool per vertex,
+    Phase 2 preserve regions) pins those vertices to their original position so a
+    preserved flat face stays flat."""
     if not len(faces) or not len(verts):
         return verts
     n = len(verts)
@@ -356,9 +453,12 @@ def taubin_smooth(verts, faces, iters=12, lam=0.5, mu=-0.53):
     deg = np.asarray(W.sum(axis=1)).ravel()
     deg[deg == 0] = 1.0
     v = verts.astype(float).copy()
+    orig = v.copy()
     for _ in range(iters):
         for step in (lam, mu):
             v = v + step * (W.dot(v) / deg[:, None] - v)
+            if frozen is not None:
+                v[frozen] = orig[frozen]            # pin preserved vertices
     return v
 
 
@@ -428,6 +528,78 @@ def main():
         for axis in range(3):
             F[3 * ids + axis] += d[axis] / len(ids)
 
+    # Phase 2 keep-regions: the user pins parts of the domain while the rest
+    # optimizes freely. solid/preserve → forced material (density 1) each iteration;
+    # void → forced empty (density 0); preserve additionally stays flat (no mesh
+    # smoothing) and un-latticed. void wins any overlap.
+    solid_mask = np.zeros((nx, ny, nz), bool)
+    void_mask = np.zeros((nx, ny, nz), bool)
+    preserve_mask = np.zeros((nx, ny, nz), bool)
+    preserve_boxes = []
+    for r in (cfg.get("regions") or []):
+        b = r.get("box")
+        if not (isinstance(b, (list, tuple)) and len(b) == 6):
+            continue
+        m = elements_in_box([float(v) for v in b], nx, ny, nz)
+        rule = r.get("rule", "solid")
+        if rule == "void":
+            void_mask |= m
+        elif rule == "preserve":
+            solid_mask |= m
+            preserve_mask |= m
+            preserve_boxes.append([float(v) for v in b])
+        else:                                    # solid / keep-filled
+            solid_mask |= m
+    solid_mask &= ~void_mask                      # void takes precedence
+    preserve_mask &= ~void_mask
+    has_passive = bool(solid_mask.any() or void_mask.any())
+
+    # Phase 3: an uploaded part becomes the DESIGN DOMAIN — material may only exist
+    # where the mesh is. Voxelize it and force everything outside to void, so the
+    # solver redesigns *inside the user's envelope* (lightweight it, keep the shell).
+    domain_mask = None
+    domain_stl = cfg.get("domain_stl")
+    if domain_stl:
+        try:
+            dv, df = read_stl(domain_stl)
+            dv = dv - dv.min(axis=0)                   # bbox min → origin (aligns with domain_mm)
+            # honest: ray-parity voxelization assumes a watertight mesh. Weld coincident
+            # verts and check — an open/non-manifold upload gives an imprecise domain.
+            _, inv = np.unique(np.round(dv, 4), axis=0, return_inverse=True)
+            if not is_watertight(inv[df]):
+                print(json.dumps({"warn": "uploaded mesh is not watertight — the design domain "
+                      "is a best-effort voxelization and may be imprecise"}), flush=True)
+            domain_mask = voxelize_mesh(dv, df, (Lx, Ly, Lz), (nx, ny, nz))
+            if float(domain_mask.mean()) < 0.005:      # nothing usable → don't pretend it worked
+                print(json.dumps({"warn": "uploaded mesh didn't voxelize into a usable domain "
+                      "(too thin or open) — redesigned the bounding box instead"}), flush=True)
+                domain_mask = None
+        except Exception as exc:
+            print(json.dumps({"warn": f"couldn't use the uploaded mesh as the domain ({exc}) "
+                  "— used the bounding box"}), flush=True)
+            domain_mask = None
+    if domain_mask is not None:
+        void_mask |= ~domain_mask                      # no material outside the part
+        solid_mask &= domain_mask                      # keep-solid/preserve only inside it
+        preserve_mask &= domain_mask
+        has_passive = True
+        if symmetry != "none":                         # mirroring an arbitrary uploaded shape is
+            symmetry = "none"                          # nonsensical AND drifts the domain-relative
+        # honest: a default/edited BC on a bbox face the part doesn't actually reach (a sphere,
+        # a rounded or recessed part) would fix/load pure void → a physically meaningless floating
+        # result that otherwise reports as a clean pass. Warn so it's visible + fixable in the recipe.
+        for s in cfg["supports"]:
+            if not (elements_in_box(s["box"], nx, ny, nz) & domain_mask).any():
+                print(json.dumps({"warn": "a fixed/support region doesn't touch the uploaded part "
+                      "— the result may be a floating structure; move the fixed face in the recipe"}), flush=True)
+        for ld in cfg["loads"]:
+            if not (elements_in_box(ld["box"], nx, ny, nz) & domain_mask).any():
+                print(json.dumps({"warn": "a load region doesn't touch the uploaded part — the load "
+                      "won't transfer into it; move it in the recipe"}), flush=True)
+    active = domain_mask                               # designable region (None ⇒ the whole box);
+    # volfrac + reporting are RELATIVE to this so an uploaded part with low occupancy isn't an
+    # impossible target measured over the full bounding box.
+
     seed = cfg.get("seed")
     asym = float(cfg.get("asymmetry", 0.0))
     if seed is not None and asym > 0:
@@ -440,6 +612,8 @@ def main():
                     0.01, 1.0)
     else:
         x = np.full((nx, ny, nz), volfrac)
+    if domain_mask is not None:
+        x = np.where(domain_mask, x, 0.0)             # start empty outside the uploaded part
     change, comp = 1.0, 0.0
     for it in range(1, max_iters + 1):
         xp = EMIN + x.ravel() ** penal * (E0 - EMIN)
@@ -479,36 +653,49 @@ def main():
         win = (size, size, size_z)
         dc = ndimage.uniform_filter(dc * x, size=win) / \
             np.maximum(1e-6, ndimage.uniform_filter(x, size=win))
-        # optimality criteria update with bisection
+        if active is not None:              # Phase 3: no incentive to place material outside the part
+            dc = np.where(active, dc, 0.0)
+        # optimality criteria update with bisection — volume measured over the ACTIVE region
         l1, l2, move = 0.0, 1e9, 0.2
         while (l2 - l1) / (l1 + l2 + 1e-12) > 1e-3:
             lmid = 0.5 * (l1 + l2)
             xnew = np.clip(x * np.sqrt(np.maximum(1e-12, -dc) / lmid),
                            np.maximum(0.0, x - move), np.minimum(1.0, x + move))
-            if xnew.mean() > volfrac:
+            frac = float(xnew[active].mean()) if active is not None else float(xnew.mean())
+            if frac > volfrac:
                 l1 = lmid
             else:
                 l2 = lmid
         change = float(np.abs(xnew - x).max())
         x = symmetrize(xnew, symmetry)      # S3: enforce style symmetry (mean-preserving)
+        if has_passive:                     # Phase 2: pin keep-regions after the update
+            x[solid_mask] = 1.0
+            x[void_mask] = 0.0
+        vfrac = float(x[active].mean()) if active is not None else float(x.mean())   # domain-relative
         png = out / f"iter{it:03d}.png"
         pv, pf = density_mesh(x, (Lx, Ly, Lz))
         render_iso(pv, pf, (Lx, Ly, Lz), png,
-                   f"iter {it}  compliance {comp:.3f}  vol {x.mean():.3f}",
+                   f"iter {it}  compliance {comp:.3f}  vol {vfrac:.3f}",
                    silhouette=x.max(axis=1), color=rcol, edge=ecol)
         print(json.dumps({"iter": it, "compliance": round(comp, 4),
-                          "vol": round(float(x.mean()), 4),
+                          "vol": round(vfrac, 4),
                           "change": round(change, 4), "preview": png.name}), flush=True)
         if it >= 10 and change < 0.02:
             break
 
-    # ---- extract final geometry: threshold, keep largest component
+    # ---- extract final geometry: threshold, keep the largest component — PLUS any
+    # component holding a forced keep-region (a keep-solid/preserve boss must never be
+    # silently dropped just because it optimized into its own island).
     thr = 0.5
     solid = x >= thr
     lab, n = ndimage.label(solid)
     if n > 1:
-        keep = np.argmax(np.bincount(lab.ravel())[1:]) + 1
-        solid = lab == keep
+        counts = np.bincount(lab.ravel())
+        keep = {int(np.argmax(counts[1:]) + 1)}
+        if has_passive:
+            keep |= {int(l) for l in np.unique(lab[solid_mask | preserve_mask]) if l > 0}
+        solid = np.isin(lab, list(keep))
+    final_pieces = int(ndimage.label(solid)[1])       # honest one-piece-or-not count
     hx, hy, hz = Lx / nx, Ly / ny, Lz / nz
 
     # ---- real TPMS / periodic lattice, evaluated on its own FINE grid so it's
@@ -521,7 +708,8 @@ def main():
         cell = (float(lattice_cell) if lattice_cell
                 else max(min(Lx, Ly, Lz) / 6.0, 8 * max(hx, hy, hz)))
         body, fh, lattice_info = tpms_lattice(solid, (Lx, Ly, Lz), cell,
-                                              kind=lattice_kind, mode=lattice_mode)
+                                              kind=lattice_kind, mode=lattice_mode,
+                                              protect=solid_mask if has_passive else None)
         if body is not None and body.any():
             fhx, fhy, fhz = fh
             tv, tf, _, _ = measure.marching_cubes(np.pad(body.astype(np.float32), 1),
@@ -537,21 +725,37 @@ def main():
         verts, faces, _, _ = measure.marching_cubes(pad, 0.5, spacing=(hx, hy, hz))
         verts -= [hx * 0.5, hy * 0.5, hz * 0.5]       # unpad + half-voxel (cell-centered)
         if mesh_finish in ("smooth", "g2-polish") and len(faces):   # S5: polish staircase
-            verts = taubin_smooth(verts, faces, iters=16 if mesh_finish == "g2-polish" else 8)
+            frozen = None
+            if preserve_boxes:                            # Phase 2: keep preserved faces flat
+                frozen = np.zeros(len(verts), bool)
+                for bx in preserve_boxes:
+                    frozen |= ((verts[:, 0] >= bx[0] * Lx) & (verts[:, 0] <= bx[3] * Lx) &
+                               (verts[:, 1] >= bx[1] * Ly) & (verts[:, 1] <= bx[4] * Ly) &
+                               (verts[:, 2] >= bx[2] * Lz) & (verts[:, 2] <= bx[5] * Lz))
+            verts = taubin_smooth(verts, faces, iters=16 if mesh_finish == "g2-polish" else 8,
+                                  frozen=frozen)
     else:                                             # degenerate (no material) → empty mesh
         verts, faces = np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
     write_stl(out / "result.stl", verts, faces)
+    vfinal = float(x[active].mean()) if active is not None else float(x.mean())   # domain-relative
     render_iso(verts, faces, (Lx, Ly, Lz), out / "final.png",
-               f"final  compliance {comp:.3f}  vol {x.mean():.3f}", color=rcol, edge=ecol,
+               f"final  compliance {comp:.3f}  vol {vfinal:.3f}", color=rcol, edge=ecol,
                edge_lw=0.25 if mesh_finish == "faceted" else 0.0,
                map_path=out / "final.map.json")           # Slice 14 pixel-map contract
     watertight = bool(len(faces)) and is_watertight(faces)
     result = {
-        "iterations": it, "compliance": comp, "vol_fraction": float(x.mean()),
+        "iterations": it, "compliance": comp,
+        "vol_fraction": float(x[active].mean()) if active is not None else float(x.mean()),
         "solid_fraction_after_threshold": float(solid.mean()),
-        "components": int(n), "kept_largest": bool(n > 1),
+        "components": final_pieces, "raw_components": int(n),
+        "kept_largest": bool(n > final_pieces),
         "watertight": watertight, "lattice_applied": bool(lattice_applied),
         "lattice": lattice_info,
+        "regions": ({"solid_vox": int(solid_mask.sum()), "void_vox": int(void_mask.sum()),
+                     "preserve_vox": int(preserve_mask.sum())}
+                    if (has_passive or preserve_mask.any()) else None),
+        "domain_upload": ({"occupancy_frac": round(float(domain_mask.mean()), 4)}
+                          if domain_mask is not None else None),
         "mesh_volume_mm3": mesh_volume(verts, faces) if watertight else None,
         "domain_mm": [Lx, Ly, Lz], "resolution": [nx, ny, nz],
         "stl": "result.stl", "final_png": "final.png", "final_map": "final.map.json",

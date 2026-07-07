@@ -183,6 +183,13 @@
   .viewport .callouts .tick{fill:#ffd23c}
   .viewport .callouts .lbl{fill:#ffe680;font:600 12px var(--mono);paint-order:stroke;stroke:#0a0d12;stroke-width:3px;stroke-linejoin:round}
   .viewport .callouts .lbu{fill:#9aa4bf;font:500 9px var(--mono);paint-order:stroke;stroke:#0a0d12;stroke-width:3px}
+  /* Phase 1: hand-rolled WebGL STL viewer (offline, no deps) — takes over the viewport when on */
+  .viewport .glview{position:absolute;inset:0;width:100%;height:100%;display:none;touch-action:none;cursor:grab;background:#080b0f}
+  .viewport .glview:active{cursor:grabbing}
+  .viewport.gl-on .glview{display:block}
+  .viewport.gl-on .vlayer,.viewport.gl-on .callouts,.viewport.gl-on .cmp,.viewport.gl-on .wash{display:none!important}
+  .viewport .glhint{position:absolute;left:10px;bottom:9px;font-family:var(--mono);font-size:10px;color:var(--dim);pointer-events:none;display:none}
+  .viewport.gl-on .glhint{display:block}
   /* revision compare: structural = draggable wipe (fixed camera registers), parametric = side-by-side */
   .cmp{position:absolute;inset:0}
   .cmp img.cmp-base,.cmp img.cmp-cur{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
@@ -239,6 +246,8 @@
   .rc .box6 label{font-size:9.5px;color:var(--faint);width:auto;margin:0}
   .rc .box6 input{width:48px}
   .rc .sen{font-size:11.5px;color:var(--dim);margin:8px 0 2px}
+  .rc .regx{float:right;background:none;border:none;color:var(--bad);cursor:pointer;font-size:11px;padding:0 2px;line-height:1}
+  .rc .regx:hover{color:#ff6b6b}
   /* structural face-picker: click a cube face to snap a support/load region */
   .rc .faces{display:flex;gap:3px;margin:5px 0 2px}
   .rc .faces button{flex:1;background:var(--raise);border:1px solid var(--line2);color:var(--dim);
@@ -269,6 +278,8 @@
       <div class="railhead">Projects</div>
       <div id="tree"></div>
       <button class="newbtn" id="newbtn">+ New part</button>
+      <button class="newbtn" id="uplbtn" style="margin-top:0">⤒ Upload part → redesign</button>
+      <input type="file" id="uplfile" accept=".stl,.step,.stp" style="display:none">
     </aside>
     <main class="stage" id="stage"></main>
     <aside class="dock" id="dock"></aside>
@@ -291,7 +302,7 @@ const STAGE_TEXT = { configuring:"configuring the design…", generating:"writin
 const S = { jobs:[], status:{active:null,queue:[],now:0}, statusAt:0,
   sel:null, selIter:null, session:null, mode:"empty",
   expanded:{}, stageKind:null, stageJob:null, dockKey:null, film:{}, play:null, vfront:"A", compare:false,
-  dims:false, maps:{}, styles:null };
+  dims:false, maps:{}, gl3d:false, styles:null };
 /* aesthetic style presets (loaded once) + lookup for the job's chosen style */
 async function loadStyles(){ try{ const r=await fetch("/api/styles"); S.styles=await r.json(); }catch(e){} }
 function styleKey(j){ return (j&&j.config&&j.config.style)||(j&&j.style)||null; }
@@ -440,6 +451,23 @@ function revDiff(a,b){
 /* ---------------- selection + mode ---------------- */
 function selectJob(id){ S.sel=id; S.selIter=null; S.session=null; S.mode="job"; S.compare=false; stopPlay(); renderMain(true); }
 $("#newbtn").onclick = ()=>{ S.sel=null; S.selIter=null; S.session=null; S.mode="new"; renderMain(true); };
+/* Phase 3: upload a part → the solver redesigns inside its envelope (default cantilever
+   load case; refine supports/loads + keep-regions in the recipe, then re-run). */
+$("#uplbtn").onclick = ()=>$("#uplfile").click();
+$("#uplfile").onchange = async (e)=>{
+  const f=e.target.files[0]; if(!f) return; e.target.value="";
+  const proj=(f.name.replace(/\.[^.]+$/,"")||"upload").toLowerCase().replace(/[^a-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40)||"upload";
+  const btn=$("#uplbtn"), was=btn.textContent; btn.textContent="⏳ uploading "+f.name+"…"; btn.disabled=true;
+  try{
+    const r=await fetch("/api/upload?name="+encodeURIComponent(f.name)+"&project="+encodeURIComponent(proj),
+      {method:"POST",headers:{"Content-Type":"application/octet-stream"},body:f});
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||"upload failed");
+    S.pendingJob=j; S.jobs=mergeJobs([j].concat(S.jobs));
+    S.expanded[j.root||baseName(j.name)]=true; selectJob(j.id); renderChrome(); poll();
+    btn.textContent=was; btn.disabled=false;
+  }catch(err){ btn.textContent="✕ "+String(err.message||"upload failed").slice(0,38);
+    setTimeout(()=>{ btn.textContent=was; btn.disabled=false; },3600); }
+};
 
 /* ---------------- main render (stage + dock) ---------------- */
 function renderMain(force){
@@ -698,11 +726,14 @@ function mountJob(j){
   $("#stage").innerHTML =
     '<div class="jobhead"><span class="jn" id="jName"></span><span class="badge" id="jBadge"></span>'+
     '<span class="stylepill" id="jStyle" style="display:none"></span>'+
-    '<span class="spacer"></span><button class="ghost" id="jDims" style="display:none">⊹ dims</button>'+
+    '<span class="spacer"></span><button class="ghost" id="j3D" style="display:none">◲ rotate</button>'+
+    '<button class="ghost" id="jDims" style="display:none">⊹ dims</button>'+
     '<button class="ghost" id="jCmp" style="display:none">⇔ compare</button>'+
     '<button class="ghost" id="jCancel">✕ cancel</button></div>'+
     '<div class="viewport"><img id="jImgA" class="vlayer" alt="" style="opacity:1">'+
       '<img id="jImgB" class="vlayer" alt="" style="opacity:0">'+
+      '<canvas id="jGL" class="glview"></canvas>'+
+      '<div class="glhint">drag&nbsp;orbit&nbsp;·&nbsp;scroll&nbsp;zoom&nbsp;·&nbsp;shift-drag&nbsp;pan</div>'+
       '<svg id="jCallouts" class="callouts" style="display:none"></svg>'+
       '<div class="cmp" id="jCompare" style="display:none"></div>'+
       '<div class="wash" id="jWash" style="display:none"><span class="sp"></span><span id="jWashT"></span></div>'+
@@ -718,8 +749,9 @@ function mountJob(j){
   $("#jCancel").onclick = async ()=>{ if(S.sel&&!S.sel.startsWith("ws-")){ await fetch("/api/jobs/"+S.sel+"/cancel",{method:"POST"}); poll(); } };
   $("#jPin").onclick = ()=>{ S.selIter=null; stopPlay(); updateJob(selected()); };
   $("#jPlay").onclick = togglePlay;
-  $("#jCmp").onclick = ()=>{ S.compare=!S.compare; updateJob(selected()); };
+  $("#jCmp").onclick = ()=>{ S.compare=!S.compare; if(S.compare)S.gl3d=false; updateJob(selected()); };
   $("#jDims").onclick = ()=>{ S.dims=!S.dims; updateJob(selected()); };
+  $("#j3D").onclick = ()=>{ S.gl3d=!S.gl3d; if(S.gl3d)S.compare=false; updateJob(selected()); };
 }
 /* cross-fade the viewport to a new frame url (fixed camera ⇒ registers in place) */
 function showFrame(url){
@@ -782,8 +814,22 @@ function updateJob(j){
   const dl=$("#jCmpDelta");
   if(dl){ if(S.compare&&canCmp){ dl.style.display=""; dl.innerHTML=compareDelta(j,base); } else dl.style.display="none"; }
 
-  // Slice 14: dimension callouts (structural only; compare owns the viewport when active)
-  const canDims = j.generator==="structural" && !RUNNING.has(j.state) && !!finalFrame(j) && !S.compare;
+  // Phase 1: interactive WebGL 3D viewer — any finished job that produced an STL
+  const ff=finalFrame(j), stlUrl=(ff&&ff.stl)?("/files/"+ff.stl+"?t="+j.updated):null;
+  const can3d = !RUNNING.has(j.state) && !!stlUrl && !S.compare;
+  const b3d=$("#j3D");
+  if(b3d){ b3d.style.display = can3d?"":"none"; b3d.textContent = (S.gl3d&&can3d)?"✕ 3D":"◲ rotate"; }
+  if(!can3d && S.gl3d) S.gl3d=false;
+  if(S.gl3d && can3d){
+    if(GLV.mount($("#jGL"))){
+      const st3=styleOf(j), hex3=(st3&&st3.palette&&st3.palette.render_hex)||"#7ba7c9";
+      GLV.show(stlUrl, hex3);
+    } else { S.gl3d=false; if(b3d) b3d.textContent="◲ rotate"; }  // no WebGL → fall back to PNG
+  } else GLV.hide();
+  if(vp) vp.classList.toggle("gl-on", S.gl3d && can3d);
+
+  // Slice 14: dimension callouts (structural only; compare / 3D own the viewport when active)
+  const canDims = j.generator==="structural" && !RUNNING.has(j.state) && !!finalFrame(j) && !S.compare && !S.gl3d;
   const dimsBtn=$("#jDims");
   if(dimsBtn){ dimsBtn.style.display = canDims?"":"none";
     dimsBtn.textContent = (S.dims&&canDims)?"✕ dims":"⊹ dims"; }
@@ -795,7 +841,7 @@ function updateJob(j){
 async function renderCallouts(j){
   const svg=$("#jCallouts"); if(!svg) return;
   const shown=shownIter(j);                             // callouts only on the final frame
-  if(!(S.dims && j && j.generator==="structural" && !S.compare && !RUNNING.has(j.state)
+  if(!(S.dims && j && j.generator==="structural" && !S.compare && !S.gl3d && !RUNNING.has(j.state)
        && finalFrame(j) && shown && shown.label==="final")){
     svg.style.display="none"; svg.innerHTML=""; return; }
   let m=S.maps[j.id];
@@ -1014,8 +1060,136 @@ document.addEventListener("keydown",e=>{
 /* the callout overlay is drawn in viewport pixels → re-register it on resize (from cache) */
 let _rzT=null;
 window.addEventListener("resize",()=>{ clearTimeout(_rzT); _rzT=setTimeout(()=>{
-  if(S.dims&&S.mode==="job"){ const j=selected(); if(j) paintCallouts(j, S.maps[j.id]); }
+  if(S.gl3d) GLV.resize();
+  else if(S.dims&&S.mode==="job"){ const j=selected(); if(j) paintCallouts(j, S.maps[j.id]); }
 },80); });
+
+/* ---------- Phase 1: hand-rolled WebGL STL viewer (offline, zero deps) ---------------------
+   Loads result.stl into a lit, orbitable 3D view. mat4 helpers are minimal + column-major
+   (WebGL convention). Geometry stays in world mm; the orbit target sits at the bbox centre.
+   Render-on-demand (no RAF loop): we draw after each interaction. Two-sided headlight so a
+   watertight mesh reads cleanly regardless of triangle winding. */
+const GLV = (function(){
+  let gl=null, cv=null, prog=null, A={}, U={}, vbo=null, nTris=0, url0=null;
+  let center=[0,0,0], radius=1, color=[.48,.65,.79];
+  let az=-2.15, el=.45, dist=3, tgt=[0,0,0];              // orbit state (az/el radians)
+  let drag=null, mounted=false;
+  const VS='attribute vec3 aPos;attribute vec3 aNorm;uniform mat4 uMVP;'+
+    'varying vec3 vN;varying vec3 vW;void main(){vN=aNorm;vW=aPos;gl_Position=uMVP*vec4(aPos,1.0);}';
+  const FS='precision mediump float;varying vec3 vN;varying vec3 vW;uniform vec3 uCam;uniform vec3 uColor;'+
+    'void main(){vec3 N=normalize(vN);vec3 V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;'+
+    'float key=max(dot(N,V),0.0);'+                                       // camera headlight
+    'float fill=max(dot(N,normalize(vec3(-0.45,0.35,0.82))),0.0)*0.35;'+  // fixed upper fill
+    'float lit=0.34+0.66*key+fill;'+                                       // ambient + key + fill
+    'float rim=pow(1.0-key,3.0)*0.20;'+                                    // silhouette lift
+    'gl_FragColor=vec4(uColor*lit+rim,1.0);}';
+
+  // ---- minimal column-major mat4
+  function persp(fovy,asp,n,f){const t=1/Math.tan(fovy/2),d=n-f;
+    return [t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/d,-1, 0,0,2*f*n/d,0];}
+  function look(e,c,up){
+    let z=[e[0]-c[0],e[1]-c[1],e[2]-c[2]];let zl=Math.hypot(z[0],z[1],z[2])||1;z=[z[0]/zl,z[1]/zl,z[2]/zl];
+    let x=[up[1]*z[2]-up[2]*z[1],up[2]*z[0]-up[0]*z[2],up[0]*z[1]-up[1]*z[0]];let xl=Math.hypot(x[0],x[1],x[2])||1;x=[x[0]/xl,x[1]/xl,x[2]/xl];
+    let y=[z[1]*x[2]-z[2]*x[1],z[2]*x[0]-z[0]*x[2],z[0]*x[1]-z[1]*x[0]];
+    return [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
+      -(x[0]*e[0]+x[1]*e[1]+x[2]*e[2]),-(y[0]*e[0]+y[1]*e[1]+y[2]*e[2]),-(z[0]*e[0]+z[1]*e[1]+z[2]*e[2]),1];}
+  function mul(a,b){const o=new Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++){let s=0;
+    for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
+  function eye(){return [tgt[0]+dist*Math.cos(el)*Math.cos(az), tgt[1]+dist*Math.cos(el)*Math.sin(az), tgt[2]+dist*Math.sin(el)];}
+
+  function compile(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
+  function mount(canvas){
+    if(mounted && cv===canvas && gl && !gl.isContextLost()) return true;   // reuse a live context
+    if(gl){ const ex=gl.getExtension("WEBGL_lose_context"); if(ex) ex.loseContext(); }  // free the old
+    mounted=false; url0=null; gl=null;                     // new canvas ⇒ re-upload geometry
+    try{                                                   // mount MUST NOT throw — degrade to PNG
+    cv=canvas; gl=cv.getContext("webgl",{antialias:true,preserveDrawingBuffer:false});
+    if(!gl || gl.isContextLost()){ gl=null; return false; }
+    prog=gl.createProgram(); gl.attachShader(prog,compile(gl.VERTEX_SHADER,VS));
+    gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,FS)); gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ gl=null; return false; }
+    A.pos=gl.getAttribLocation(prog,"aPos"); A.norm=gl.getAttribLocation(prog,"aNorm");
+    U.mvp=gl.getUniformLocation(prog,"uMVP"); U.cam=gl.getUniformLocation(prog,"uCam"); U.color=gl.getUniformLocation(prog,"uColor");
+    vbo=gl.createBuffer(); gl.enable(gl.DEPTH_TEST); gl.clearColor(0.031,0.043,0.059,1);
+    }catch(e){ gl=null; mounted=false; return false; }
+    // interaction (pointer events; render-on-demand)
+    cv.addEventListener("pointerdown",e=>{ drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2}; cv.setPointerCapture(e.pointerId); e.preventDefault(); });
+    cv.addEventListener("pointermove",e=>{ if(!drag)return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
+      if(drag.pan){ const e0=eye(); let z=[tgt[0]-e0[0],tgt[1]-e0[1],tgt[2]-e0[2]];const zl=Math.hypot(z[0],z[1],z[2])||1;z=[z[0]/zl,z[1]/zl,z[2]/zl];
+        const up=[0,0,1]; let x=[up[1]*z[2]-up[2]*z[1],up[2]*z[0]-up[0]*z[2],up[0]*z[1]-up[1]*z[0]];const xl=Math.hypot(x[0],x[1],x[2])||1;x=[x[0]/xl,x[1]/xl,x[2]/xl];
+        let y=[z[1]*x[2]-z[2]*x[1],z[2]*x[0]-z[0]*x[2],z[0]*x[1]-z[1]*x[0]];
+        const k=dist*0.0016; tgt=[tgt[0]-(x[0]*dx-y[0]*dy)*k, tgt[1]-(x[1]*dx-y[1]*dy)*k, tgt[2]-(x[2]*dx-y[2]*dy)*k]; }
+      else { az-=dx*0.01; el+=dy*0.01; const L=1.5533; el=Math.max(-L,Math.min(L,el)); }
+      render(); });
+    const end=e=>{ drag=null; };
+    cv.addEventListener("pointerup",end); cv.addEventListener("pointercancel",end);
+    cv.addEventListener("contextmenu",e=>e.preventDefault());
+    cv.addEventListener("wheel",e=>{ e.preventDefault(); dist*=Math.exp(e.deltaY*0.0012);
+      dist=Math.max(radius*0.25,Math.min(radius*40,dist)); render(); },{passive:false});
+    mounted=true; return true;
+  }
+  function parseSTL(buf){
+    const dv=new DataView(buf); const n=dv.getUint32(80,true);
+    if(84+n*50>buf.byteLength) throw new Error("bad STL");
+    const v=new Float32Array(n*18); let o=84,p=0;
+    const bb=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
+    for(let i=0;i<n;i++){ o+=12; const t=[];
+      for(let k=0;k<3;k++){ const x=dv.getFloat32(o,true),y=dv.getFloat32(o+4,true),z=dv.getFloat32(o+8,true); o+=12; t.push(x,y,z);
+        if(x<bb[0])bb[0]=x; if(y<bb[1])bb[1]=y; if(z<bb[2])bb[2]=z; if(x>bb[3])bb[3]=x; if(y>bb[4])bb[4]=y; if(z>bb[5])bb[5]=z; }
+      o+=2;
+      const ux=t[3]-t[0],uy=t[4]-t[1],uz=t[5]-t[2], wx=t[6]-t[0],wy=t[7]-t[1],wz=t[8]-t[2];
+      let nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx; const l=Math.hypot(nx,ny,nz)||1; nx/=l;ny/=l;nz/=l;
+      for(let k=0;k<3;k++){ v[p++]=t[k*3];v[p++]=t[k*3+1];v[p++]=t[k*3+2]; v[p++]=nx;v[p++]=ny;v[p++]=nz; } }
+    return {v,n,bb};
+  }
+  async function show(url,hex){
+    if(!gl){ return; }
+    color = hexRGB(hex);
+    const mx=Math.max(color[0],color[1],color[2]);        // lift very dark styles so geometry stays legible
+    if(mx<0.55){ const s=0.55/(mx||1e-3); color=[Math.min(1,color[0]*s),Math.min(1,color[1]*s),Math.min(1,color[2]*s)]; }
+    if(url!==url0){                                        // (re)load geometry only when it changes
+      url0=url; const myUrl=url, myGl=gl;
+      try{ const r=await fetch(url); const buf=await r.arrayBuffer();
+        if(url0!==myUrl || gl!==myGl) return;              // a newer load / job switch superseded this
+        const g=parseSTL(buf);
+        nTris=g.n; gl.bindBuffer(gl.ARRAY_BUFFER,vbo); gl.bufferData(gl.ARRAY_BUFFER,g.v,gl.STATIC_DRAW);
+        center=[(g.bb[0]+g.bb[3])/2,(g.bb[1]+g.bb[4])/2,(g.bb[2]+g.bb[5])/2];
+        radius=0.5*Math.hypot(g.bb[3]-g.bb[0],g.bb[4]-g.bb[1],g.bb[5]-g.bb[2])||1;
+        tgt=center.slice(); dist=radius*2.6; az=-2.15; el=0.5;
+      }catch(e){ if(url0===myUrl) nTris=0; }
+    }
+    resize();
+  }
+  function resize(){
+    if(!gl||!cv) return; const dpr=Math.min(window.devicePixelRatio||1,2);
+    const w=Math.max(1,Math.round(cv.clientWidth*dpr)), h=Math.max(1,Math.round(cv.clientHeight*dpr));
+    if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
+    render();
+  }
+  function render(){
+    if(!gl||!cv||!nTris) { if(gl){gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);} return; }
+    gl.viewport(0,0,cv.width,cv.height); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    const e=eye(), asp=cv.width/cv.height||1;
+    const mvp=mul(persp(0.82,asp,Math.max(radius*0.02,0.01),radius*60), look(e,tgt,[0,0,1]));
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+    gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos,3,gl.FLOAT,false,24,0);
+    gl.enableVertexAttribArray(A.norm); gl.vertexAttribPointer(A.norm,3,gl.FLOAT,false,24,12);
+    gl.uniformMatrix4fv(U.mvp,false,new Float32Array(mvp));
+    gl.uniform3fv(U.cam,new Float32Array(e)); gl.uniform3fv(U.color,new Float32Array(color));
+    gl.drawArrays(gl.TRIANGLES,0,nTris*3);
+  }
+  function hide(){                                        // only abandon a DETACHED canvas (job
+    if(gl && cv && !cv.isConnected){                       // switch); a same-job toggle keeps its
+      const ex=gl.getExtension("WEBGL_lose_context"); if(ex) ex.loseContext();  // live context so
+      gl=null; cv=null; mounted=false; url0=null; nTris=0;                      // re-open reuses it
+    }
+  }
+  function hexRGB(h){ h=(h||"").replace("#",""); if(h.length!==6) return [.48,.65,.79];
+    return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255]; }
+  return { mount, show, resize, hide };
+})();
 
 /* ---------- DOCK: recipe + metrics + log ---------- */
 function renderDock(kind){
@@ -1092,6 +1266,29 @@ function wireFaces(){
     });
   });
 }
+/* Phase 2: keep-regions — pin surfaces (solid / preserve-flat / clear) while the rest
+   optimizes. Edited in a live list (S.editRegions), reusing the face-picker + box6 UI. */
+const REGION_RULES=[["solid","🧱 keep solid"],["preserve","📐 preserve (flat)"],["void","⬛ keep clear"]];
+function syncRegionsFromDOM(){                          // pull current inputs into S.editRegions
+  const g=s=>$('[data-r="'+s+'"]');
+  (S.editRegions||[]).forEach((r,i)=>{
+    for(let o=0;o<6;o++){ const e=g("reg-"+i+"-"+o); if(e) r.box[o]=Math.max(0,Math.min(1,+e.value/100)); }
+    const rs=g("regrule-"+i); if(rs) r.rule=rs.value;
+  });
+}
+function renderRegions(){
+  const box=$("#rRegions"); if(!box) return;
+  const regs=S.editRegions||[];
+  box.innerHTML = regs.length ? regs.map((r,i)=>{
+    const opts=REGION_RULES.map(([v,lab])=>'<option value="'+v+'"'+(r.rule===v?" selected":"")+'>'+lab+'</option>').join("");
+    return '<div class="sen"><select data-r="regrule-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select> '+
+      regionSentence(r.box)+'<button type="button" class="regx" data-rmreg="'+i+'" title="remove">✕</button></div>'+
+      facePicker("reg",i,r.box)+box6("reg",i,r.box);
+  }).join("") : '<div class="hint" style="padding:2px 0 0">none — the whole body optimizes freely.</div>';
+  box.querySelectorAll("[data-rmreg]").forEach(b=>b.onclick=()=>{
+    syncRegionsFromDOM(); S.editRegions.splice(+b.dataset.rmreg,1); renderRegions(); wireFaces(); });
+  wireFaces();
+}
 /* progressive disclosure: plain-language labels + primary/fine grouping for parametric */
 const PARAM_LABELS={length:"length",width:"width",thickness:"thickness",corner_fillet:"corner fillet r",edge_chamfer:"edge chamfer",flutes:"flutes (reeding)",pockets:"lightening pockets",
   bore_d:"bore ⌀",hole_d:"hole ⌀",hole_n:"hole count",pattern:"hole pattern",circle_d:"bolt-circle ⌀",
@@ -1123,6 +1320,9 @@ function renderRecipe(j){
       const opts=DIRS.map(([v,lab])=>'<option value=\''+v+'\' '+(v===dv?"selected":"")+'>'+lab+'</option>').join("")+
         (DIRS.some(([v])=>v===dv)?"":'<option value=\''+dv+'\' selected>custom</option>');
       h+='<div class="sen">⬇ <b style="color:var(--ink)">Load:</b> '+regionSentence(l.box)+' <select data-r="dir-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select></div>'+facePicker("load",i,l.box)+box6("load",i,l.box); });
+    h+='<div class="grp">Keep regions <span class="hint" style="font-weight:400">— pin surfaces while the rest optimizes</span></div>'+
+       '<div id="rRegions"></div>'+
+       '<button type="button" class="ghost" id="rAddReg" style="margin-top:6px;font-size:11px;padding:4px 9px">+ add keep region</button>';
   } else if(cfg.template){
     const bj=baselineJob(j), baseParams=(bj&&bj.config&&bj.config.params)||null;
     const entries=Object.entries(cfg.params);
@@ -1137,6 +1337,12 @@ function renderRecipe(j){
   wrap.innerHTML=h;
   $("#dRev").onclick=runRevision;
   wireFaces();
+  if(cfg.engine==="structural"){                         // Phase 2 keep-regions live list
+    S.editRegions=(cfg.regions||[]).map(r=>({box:r.box.slice(),rule:r.rule}));
+    renderRegions();
+    const ar=$("#rAddReg"); if(ar) ar.onclick=()=>{ syncRegionsFromDOM();
+      S.editRegions.push({box:[0.94,0,0,1,1,1],rule:"solid"}); renderRegions(); };
+  }
   const sa=$("#showAll"); if(sa) sa.onclick=()=>{ const g=$("#fineGrp"), open=g.style.display!=="none";
     g.style.display=open?"none":""; sa.textContent = open?("+ show all "+sa.dataset.total+" fields ▾"):"▲ hide fine controls"; };
   wrap.dataset.style = styleKey(j)||"";
@@ -1150,6 +1356,9 @@ async function runRevision(){
     const qs=g("quality"); if(qs) cfg.quality=qs.value;
     (cfg.supports||[]).forEach((s,i)=>{for(let o=0;o<6;o++){const e=g("sup-"+i+"-"+o); if(e)s.box[o]=+e.value/100;}});
     (cfg.loads||[]).forEach((l,i)=>{for(let o=0;o<6;o++){const e=g("load-"+i+"-"+o); if(e)l.box[o]=+e.value/100;} l.dir=JSON.parse(g("dir-"+i).value);});
+    syncRegionsFromDOM();                                // Phase 2 keep-regions
+    const regs=(S.editRegions||[]).filter(r=>r.box[3]>r.box[0]&&r.box[4]>r.box[1]&&r.box[5]>r.box[2]);
+    if(regs.length) cfg.regions=regs; else delete cfg.regions;
   } else { for(const k of Object.keys(cfg.params)){const e=g("param-"+k); if(e)cfg.params[k]=+e.value;} }
   const rs=$("#dRecipe").dataset.style; if(rs) cfg.style=rs; else delete cfg.style;   // restyle (S2)
   $("#dRev").disabled=true; $("#dRevErr").textContent="";

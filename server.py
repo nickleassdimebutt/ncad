@@ -17,6 +17,7 @@ import copy
 import json
 import os
 import re
+import struct
 import subprocess
 import threading
 import time
@@ -28,6 +29,9 @@ from pathlib import Path
 CAD_ROOT = (Path.home() / "Documents" / "CAD").resolve()
 APP_DIR = Path(__file__).resolve().parent
 AGENTCAD = str(CAD_ROOT / ".venv" / "bin" / "agentcad")
+CAD_PYTHON = str(CAD_ROOT / ".venv" / "bin" / "python")   # build123d venv (STEP/IGES import)
+UPLOAD_MAX = 150 * 1024 * 1024                            # Phase 3: max upload size
+MAX_UPLOAD_TRIS = 2_000_000                               # matches topo.MAX_STL_TRIS (voxel cost)
 # Generation is ONE direct chat call to LM Studio — we only need file
 # content, so the multi-turn codex machinery (slow, wedge-prone under a
 # server) is deliberately not used here. codex-hermes remains the tool for
@@ -574,6 +578,23 @@ def spawn_variant(parent, domain, bc, seed, label, quality, style=None):
         log(parent, f"could not spawn variant '{label}': {exc}")
 
 
+def clean_regions(cfg):
+    """Phase 2 keep-regions: [{box:[6 normalized], rule:'solid'|'void'|'preserve'}].
+    Drops malformed / zero-volume boxes; caps the count."""
+    out = []
+    for r in (cfg.get("regions") or [])[:24]:
+        if not isinstance(r, dict):
+            continue
+        try:
+            box = [max(0.0, min(1.0, float(v))) for v in (r.get("box") or [])][:6]
+        except (TypeError, ValueError):
+            continue
+        rule = r.get("rule") if r.get("rule") in ("solid", "void", "preserve") else "solid"
+        if len(box) == 6 and box[3] > box[0] and box[4] > box[1] and box[5] > box[2]:
+            out.append({"box": box, "rule": rule})
+    return out
+
+
 def sanitize_bc(cfg):
     """Clamp a user- or LLM-provided load case into a safe shape."""
     out = {"supports": [], "loads": [], "volfrac": 0.3}
@@ -590,6 +611,7 @@ def sanitize_bc(cfg):
         out["volfrac"] = max(0.1, min(0.6, float(cfg.get("volfrac", 0.3))))
     except (TypeError, ValueError):
         pass
+    out["regions"] = clean_regions(cfg)               # Phase 2 keep-regions
     if not out["supports"] or not out["loads"]:
         raise ValueError("a revision needs at least one support and one load")
     return out
@@ -718,10 +740,28 @@ def run_structural_job(job, proj):
         cfg["lattice_kind"] = lat_kind
     if style:
         cfg["palette"] = style.get("palette")      # S1: recolor the render (normalized → always present)
+    regions = bc.get("regions") or []              # Phase 2 keep-regions (from an edited recipe)
+    if regions:
+        cfg["regions"] = regions
+    # Phase 3: an uploaded part defines the design domain — carry its STL path through
+    # every run/revision so the solver keeps redesigning inside that envelope.
+    dstl = ((override or {}).get("domain_stl")
+            or (job.get("config") or {}).get("domain_stl") or job.get("domain_stl"))
+    if dstl:                                        # only accept a domain STL inside the workspace
+        try:
+            dp = Path(dstl).resolve()
+            if dp.is_file() and dp.is_relative_to(CAD_ROOT):
+                cfg["domain_stl"] = str(dp)
+        except (OSError, ValueError):
+            pass
     with LOCK:
         job["config"] = {"engine": "structural", "domain_mm": domain,
                          "volfrac": cfg["volfrac"], "quality": qkey,
                          "supports": bc["supports"], "loads": bc["loads"]}
+        if regions:
+            job["config"]["regions"] = regions
+        if dstl and Path(dstl).exists():
+            job["config"]["domain_stl"] = dstl
         if skey:
             job["config"]["style"] = skey
         if seed is not None:
@@ -758,6 +798,11 @@ def run_structural_job(job, proj):
             if msg.get("done"):
                 final = msg
                 continue
+            if msg.get("warn"):                         # solver notes (e.g. domain voxelization)
+                log(job, "note: " + str(msg["warn"])[:200])
+                continue
+            if "iter" not in msg:                       # ignore any other non-iteration line safely
+                continue
             it = {"iteration": msg["iter"], "label": f"topo-{msg['iter']}", "passed": False,
                   "metrics": {"compliance": msg["compliance"], "vol_fraction": msg["vol"],
                               "change": msg["change"]},
@@ -784,7 +829,10 @@ def run_structural_job(job, proj):
     if abs(final["vol_fraction"] - cfg["volfrac"]) > 0.05:
         problems.append(f"volume fraction {final['vol_fraction']:.3f} vs target {cfg['volfrac']}")
     if final["components"] > 1:
-        log(job, f"note: {final['components']} disconnected regions found; kept the largest")
+        log(job, f"warning: result is in {final['components']} disconnected pieces — a keep "
+                 "region is likely isolated from the load path; move it or bridge to it")
+    elif final.get("kept_largest"):
+        log(job, "note: trimmed disconnected optimization islands; kept the connected body")
     it = {"iteration": final["iterations"] + 1, "label": "final", "passed": not problems,
           "metrics": {"compliance": final["compliance"], "vol_fraction": final["vol_fraction"],
                       "mesh_volume_mm3": final["mesh_volume_mm3"],
@@ -1462,6 +1510,43 @@ def detected_features(session):
     return feats
 
 
+def stl_bounds(path):
+    """Min/max XYZ of a binary or ASCII STL (stdlib only). Returns (x0,y0,z0,x1,y1,z1)."""
+    data = Path(path).read_bytes()
+    lo = [1e18, 1e18, 1e18]; hi = [-1e18, -1e18, -1e18]
+    def acc(x, y, z):
+        for d, v in enumerate((x, y, z)):
+            if v < lo[d]: lo[d] = v
+            if v > hi[d]: hi[d] = v
+    if data[:5].lower() == b"solid" and b"facet" in data[:2048].lower():        # ASCII
+        for ln in data.decode("ascii", "ignore").split("\n"):
+            t = ln.split()
+            if len(t) >= 4 and t[0] == "vertex":
+                acc(float(t[1]), float(t[2]), float(t[3]))
+    else:                                                                       # binary
+        n = struct.unpack("<I", data[80:84])[0]
+        if n > MAX_UPLOAD_TRIS:
+            raise ValueError(f"mesh too complex ({n} triangles, cap {MAX_UPLOAD_TRIS}) — decimate it")
+        for i in range(n):
+            base = 84 + i * 50 + 12
+            for k in range(3):
+                x, y, z = struct.unpack("<3f", data[base + k * 12:base + k * 12 + 12])
+                acc(x, y, z)
+    if hi[0] < lo[0]:
+        raise ValueError("no triangles found")
+    return tuple(lo + hi)
+
+
+def convert_to_stl(src, dst):
+    """STEP/IGES → STL via the build123d (CAD) venv. Raises on failure."""
+    prog = ("import sys; from build123d import import_step, export_stl; "
+            "export_stl(import_step(sys.argv[1]), sys.argv[2])")
+    r = subprocess.run([CAD_PYTHON, "-c", prog, str(src), str(dst)],
+                       capture_output=True, text=True, timeout=180)
+    if r.returncode != 0 or not Path(dst).exists():
+        raise RuntimeError((r.stderr or "conversion failed")[-300:])
+
+
 def submit_internal(payload):
     """Create + queue a job from server-side code (same path as POST)."""
     job = new_job(payload)
@@ -1624,6 +1709,53 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._local():
             return self._send(403, {"error": "local only"})
+
+        # ---- Phase 3: upload a part → design domain for a structural redesign
+        if self.path.split("?")[0] == "/api/upload":
+            from urllib.parse import urlparse, parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            fname = q.get("name", ["part.stl"])[0]
+            ext = Path(fname).suffix.lower()
+            proj = (re.sub(r"[^a-zA-Z0-9_-]+", "-", q.get("project", [Path(fname).stem])[0])
+                    [:40].strip("-").lower() or "upload")
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+            except (TypeError, ValueError):
+                return self._send(400, {"error": "bad Content-Length header"})
+            if length <= 0 or length > UPLOAD_MAX:
+                return self._send(400, {"error": "empty or oversized upload (max 150 MB)"})
+            if ext not in (".stl", ".step", ".stp"):
+                return self._send(400, {"error": f"unsupported format '{ext}' — use STL or STEP "
+                                        "(export SolidWorks/other parts as STEP)"})
+            raw = self.rfile.read(length)
+            try:
+                projdir = CAD_ROOT / proj
+                projdir.mkdir(parents=True, exist_ok=True)
+                (projdir / ("source" + ext)).write_bytes(raw)
+                stl = projdir / "domain.stl"
+                if ext == ".stl":
+                    stl.write_bytes(raw)
+                else:
+                    convert_to_stl(projdir / ("source" + ext), stl)   # STEP/IGES → STL
+                b = stl_bounds(stl)
+            except Exception as exc:
+                return self._send(400, {"error": f"could not read {ext or 'file'}: {str(exc)[:200]}"})
+            dims = [round(b[3] - b[0], 3), round(b[4] - b[1], 3), round(b[5] - b[2], 3)]
+            if not all(1 <= d <= 2000 for d in dims):
+                return self._send(400, {"error": f"part size out of range: {dims} mm (expect 1–2000)"})
+            cfg = {"engine": "structural", "domain_mm": dims,
+                   "supports": [{"box": [0, 0, 0, 0.03, 1, 1]}],       # default cantilever;
+                   "loads": [{"box": [0.97, 0, 0, 1, 1, 1], "dir": [0, 0, -1]}],   # user refines
+                   "domain_stl": str(stl)}
+            try:
+                job = submit_internal({
+                    "name": proj, "generator": "structural",
+                    "brief": f"redesign uploaded part ({fname}) inside its own envelope",
+                    "bbox": {"x": dims[0], "y": dims[1], "z": dims[2]},
+                    "quality": q.get("quality", ["draft"])[0], "config": cfg})
+            except ValueError as exc:
+                return self._send(409, {"error": str(exc)})
+            return self._send(201, public_job(job))
 
         # ---- guided design sessions
         if self.path == "/api/sessions":

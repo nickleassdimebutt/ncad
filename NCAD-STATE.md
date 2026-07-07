@@ -203,6 +203,51 @@ DETERMINISTIC stack. LLM picks it once at the gate (synthesize_spec returns
   needing arbitrary points can carry the 4×4 proj matrix too (not needed yet). VERIFIED
   live in-browser (screenshot: L 160 / W 60 / H 90 leaders correctly outside the part).
 
+## DONE 2026-07-06 (session 5): 3D viewer + surface constraints + upload→redesign
+Three composed features — upload a part → it's the design domain → mark faces to preserve →
+lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
+- **Phase 1 — hand-rolled WebGL viewer** (index.html `GLV` IIFE, ~150 lines, raw WebGL, zero
+  deps). `◲ rotate` toggle on any finished job with an STL. Loads result.stl, lit two-sided
+  (camera headlight + fixed fill + rim), orbit/zoom(wheel)/pan(shift-drag). Auto-fits bbox;
+  tints to the style palette but FLOORS brightness (dark resin styles stayed legible). Minimal
+  column-major mat4 (persp/look/mul). Releases the GL context via WEBGL_lose_context on canvas
+  remount (no context leak); falls back to the PNG if WebGL is unavailable. Mutually exclusive
+  with compare/dims (`.gl-on` class hides the other viewport layers).
+- **Phase 2 — keep-regions** (structural only). Recipe gains a KEEP REGIONS list: each region
+  = {box (normalized, same face-picker+box6 UI as supports/loads), rule}. Rules: 🧱 keep-solid
+  (SIMP passive → density pinned 1), ⬛ keep-void (pinned 0), 📐 preserve (pinned 1 + kept flat
+  by freezing those verts in taubin_smooth + un-latticed). topo.py: elements_in_box → solid/
+  void/preserve masks forced each iter after symmetrize; tpms_lattice `protect=` keeps regions
+  solid; **forced regions are NEVER dropped by the largest-component filter** (kept + honest
+  `components`/`raw_components` count; server logs "in N disconnected pieces — a keep region is
+  isolated" vs "trimmed islands"). server.py: `clean_regions`, sanitize_bc carries regions,
+  threaded to cfg + job.config (rides the LLM-free /revise flow). Client: S.editRegions live
+  list (add/remove), syncRegionsFromDOM on revise.
+- **Phase 3 — upload → design domain.** `⤒ Upload part → redesign` in the rail → POST
+  `/api/upload?name=&project=` (raw body). STL used directly; STEP converted via the build123d
+  CAD venv (`convert_to_stl` = `export_stl(import_step(src))`). `stl_bounds` (stdlib) → domain_mm;
+  creates a structural job with a default cantilever load case + `domain_stl`.
+  topo.py `read_stl` (binary+ascii, 2M-tri cap) + `voxelize_mesh` (numpy ray-parity, ~14ms on the
+  test part, holes captured; sample points jittered 0.5007/0.4993 to dodge axis-aligned-edge
+  double-counts) → `domain_mask` forces void OUTSIDE the part so the solver redesigns inside
+  the user's envelope. `domain_stl` threaded through runs + revisions; **guarded to CAD_ROOT**
+  (a revise can't point it at an arbitrary file). SolidWorks native .sldprt is NOT readable
+  offline → **STL/STEP only** (export SLDPRT→STEP; IGES dropped — import_step is STEP-only).
+  Verified: STL, STEP, and a browser upload all voxelize to the identical 0.89-occupancy domain
+  and solve watertight; revisions keep the domain.
+- **Reviewed twice** (cloud Codex gpt-5.5, then a 4-lens Claude verification workflow, then Codex
+  again on the fixes). 9 confirmed defects FIXED & verified: STL 2M-tri cap (voxelize DoS);
+  non-watertight upload → honest warn (was a silent full-bbox fallback); **volfrac made
+  DOMAIN-RELATIVE** via an `active` mask (an uploaded part with occupancy < volfrac was an
+  impossible target measured over the bbox → falsely "failed"); lattice `protect` no longer drops
+  isolated keep-regions; `clean_regions` non-dict guard; `GLV.hide()` frees the context ONLY for a
+  DETACHED canvas (loseContext on a live canvas broke same-job re-open) + `mount()` never throws
+  (try/catch + isContextLost → PNG fallback); **floating-BC warn** (a default support/load on a
+  bbox face a rounded/recessed part doesn't reach = fixed/loaded pure void → meaningless
+  ~1e8-compliance result that otherwise reported as a clean pass); IGES dropped; `/api/upload`
+  Content-Length parse guarded. Demo jobs left: upl-stl/upl-step/upl-browser, t-ok, smoke-frame,
+  bones-demo-r6/r7 (deletable).
+
 ## PENDING — leftover
 Parametric "measured lock rows" from the guided finalize flow are only partially served
 (labels help); the session finalize path itself is unchanged. Consider: force a lighter
