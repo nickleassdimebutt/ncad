@@ -257,7 +257,18 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
   3 fixes — sync GLV tool on stage rebuild, reset geometry on `mount()` (no stale-mesh pick during
   load), exclude pan gestures (`!drag.pan`) from picking. Verified live (top→solid, floor→preserve).
 - **Cleanup:** trashed the demo/test jobs to ~/.Trash (upl-*, t-ok, smoke-frame, bones-demo-r6/r7),
-  killed a 37h-wedged agentcad process. Repo (branch main) is at commit 23dbc18, local-only (no remote).
+  killed a 37h-wedged agentcad process.
+- **Mesh detail (sub-voxel smoothing):** the plain-solid final mesh (and the live previews) now
+  march the CONTINUOUS filtered density UPSAMPLED `mesh_detail`× (trilinear), NOT the binary x≥0.5
+  staircase — recovering the sub-voxel gradient the density filter computed. Surface smoothness is
+  DECOUPLED from the coarse solve grid (a fine mesh from a coarse solve; structure unchanged, only
+  the surface). Restricted to the kept component (dilated 1 for the boundary layer), memory-capped
+  (~15M voxels), faceted styles stay 1× (crystalline look). `mesh_detail` 1/2/3 = coarse/smooth/fine
+  (default 2), a recipe knob independent of quality, threaded server→topo→job.config. topo.py
+  `density_mesh(detail=)` + the final block; the "side x-ray" inset was a red herring — it's just
+  `x.max(axis=1)` imshow'd, never fed forward. Verified: detail 1→3 on a cantilever went from heavy
+  staircase to smooth, all watertight (20k→188k tris), same compliance/topology.
+  Repo (branch main), local-only (no remote).
 
 ## PENDING — leftover
 Parametric "measured lock rows" from the guided finalize flow are only partially served

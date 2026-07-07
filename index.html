@@ -1416,6 +1416,8 @@ function renderRecipe(j){
        '<div class="rl"><span class="rk">keep material</span><span class="rv"><input type="number" min="10" max="60" value="'+Math.round(cfg.volfrac*100)+'" data-r="volfrac"> %</span></div>'+
        '<div class="rl"><span class="rk">quality</span><span class="rv"><select data-r="quality" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          ['draft','balanced','fine'].map(q=>'<option value="'+q+'"'+((cfg.quality||"draft")===q?" selected":"")+'>'+q+'</option>').join("")+'</select></span></div>'+
+       '<div class="rl"><span class="rk">mesh detail</span><span class="rv"><select data-r="mesh_detail" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+         [[1,'coarse'],[2,'smooth'],[3,'fine']].map(o=>'<option value="'+o[0]+'"'+((+cfg.mesh_detail||2)===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select> <span class="hint">surface only</span></span></div>'+
        (cfg.seed!=null?'<div class="rl"><span class="rk">seed</span><span class="rv">'+esc(cfg.seed)+(cfg.variant_label?" · "+esc(cfg.variant_label):"")+'</span></div>':'');
     (cfg.supports||[]).forEach((s,i)=>{ h+='<div class="sen">🔒 <b style="color:var(--ink)">Fixed:</b> '+regionSentence(s.box)+'</div>'+facePicker("sup",i,s.box)+box6("sup",i,s.box); });
     (cfg.loads||[]).forEach((l,i)=>{ const dv=JSON.stringify(l.dir.map(v=>Math.round(v*100)/100));
@@ -1456,6 +1458,7 @@ async function runRevision(){
   if(cfg.engine==="structural"){
     cfg.domain_mm=[0,1,2].map(i=>+g("dom-"+i).value); cfg.volfrac=+g("volfrac").value/100;
     const qs=g("quality"); if(qs) cfg.quality=qs.value;
+    const mds=g("mesh_detail"); if(mds) cfg.mesh_detail=+mds.value;
     (cfg.supports||[]).forEach((s,i)=>{for(let o=0;o<6;o++){const e=g("sup-"+i+"-"+o); if(e)s.box[o]=+e.value/100;}});
     (cfg.loads||[]).forEach((l,i)=>{for(let o=0;o<6;o++){const e=g("load-"+i+"-"+o); if(e)l.box[o]=+e.value/100;} l.dir=JSON.parse(g("dir-"+i).value);});
     syncRegionsFromDOM();                                // Phase 2 keep-regions

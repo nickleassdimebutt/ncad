@@ -730,6 +730,11 @@ def run_structural_job(job, proj):
         cfg["z_bias"] = max(0.5, min(2.5, z_bias))
     if mesh_finish != "as-is":
         cfg["mesh_finish"] = mesh_finish           # S5: smooth vs faceted final mesh
+    try:                                           # mesh detail: sub-voxel surface upsample (1–3),
+        md = int((override or {}).get("mesh_detail", 2))   # independent of the solve resolution
+    except (TypeError, ValueError):
+        md = 2
+    cfg["mesh_detail"] = max(1, min(3, md))
     features = (style.get("feature_language") or []) if style else []
     # S6 structural infill: map the style's feature tokens to a fine-grid lattice kind.
     # tracery (gothic openwork) wins over a plain lattice; ribs are the coarse fallback.
@@ -757,6 +762,7 @@ def run_structural_job(job, proj):
     with LOCK:
         job["config"] = {"engine": "structural", "domain_mm": domain,
                          "volfrac": cfg["volfrac"], "quality": qkey,
+                         "mesh_detail": cfg["mesh_detail"],
                          "supports": bc["supports"], "loads": bc["loads"]}
         if regions:
             job["config"]["regions"] = regions

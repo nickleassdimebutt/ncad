@@ -292,18 +292,20 @@ def render_iso(verts, faces, dims, path, title, silhouette=None,
     plt.close(fig)
 
 
-def density_mesh(x, dims):
-    """Marching cubes on the current density field. Early fields are nearly
-    uniform (no voxel reaches 0.5 yet), so the iso level adapts: start at the
-    field's own upper range and converge to the final 0.5 threshold."""
-    nx, ny, nz = x.shape
+def density_mesh(x, dims, detail=1):
+    """Marching cubes on the current density field. `detail`>1 upsamples the CONTINUOUS
+    field (trilinear) before marching → a smooth, sub-voxel surface from the coarse solve
+    instead of the voxel staircase. Early fields are nearly uniform (no voxel reaches 0.5
+    yet), so the iso adapts: start at the field's own upper range, converge to 0.5."""
     Lx, Ly, Lz = dims
     iso = min(0.5, float(np.quantile(x, 0.85)))
     iso = min(iso, float(x.max()) - 1e-4)
     if iso <= 1e-4:
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
-    pad = np.pad(x, 1)
-    hx, hy, hz = Lx / nx, Ly / ny, Lz / nz
+    field = ndimage.zoom(x, detail, order=1) if detail > 1 else x
+    fnx, fny, fnz = field.shape
+    hx, hy, hz = Lx / fnx, Ly / fny, Lz / fnz
+    pad = np.pad(field, 1)
     verts, faces, _, _ = measure.marching_cubes(pad, iso, spacing=(hx, hy, hz))
     verts -= [hx * 0.5, hy * 0.5, hz * 0.5]
     return verts, faces
@@ -481,6 +483,10 @@ def main():
     symmetry = cfg.get("symmetry", "none")      # S3: enforced each iteration
     z_bias = float(cfg.get("z_bias", 1.0))      # S3: >1 biases toward vertical members
     mesh_finish = cfg.get("mesh_finish", "as-is")  # S5: final-mesh smooth vs faceted
+    # mesh detail: upsample the CONTINUOUS density before marching so the surface is sub-voxel
+    # smooth (decoupled from the coarse solve grid), NOT the binary staircase. Faceted styles
+    # want the low-poly crystalline look, so they stay at 1×.
+    mesh_detail = 1 if mesh_finish == "faceted" else max(1, min(3, int(cfg.get("mesh_detail", 2))))
     lattice = bool(cfg.get("lattice"))          # S6: TPMS/periodic infill (Lattice/Gothic)
     lattice_cell = cfg.get("lattice_cell")      # mm; None → auto
     lattice_kind = cfg.get("lattice_kind", "gyroid")   # gyroid|schwarz_p|diamond|ribs|tracery
@@ -673,7 +679,7 @@ def main():
             x[void_mask] = 0.0
         vfrac = float(x[active].mean()) if active is not None else float(x.mean())   # domain-relative
         png = out / f"iter{it:03d}.png"
-        pv, pf = density_mesh(x, (Lx, Ly, Lz))
+        pv, pf = density_mesh(x, (Lx, Ly, Lz), detail=min(mesh_detail, 2))   # previews: cap 2× for speed
         render_iso(pv, pf, (Lx, Ly, Lz), png,
                    f"iter {it}  compliance {comp:.3f}  vol {vfrac:.3f}",
                    silhouette=x.max(axis=1), color=rcol, edge=ecol)
@@ -720,11 +726,22 @@ def main():
 
     if fine_mesh is not None:                         # lattice mesh: do NOT smooth — it
         verts, faces = fine_mesh                      # would erase the thin walls; the
-    elif solid.any():                                 # fine grid already reads continuous
-        pad = np.pad(solid.astype(float), 1)          # plain-solid path (coarse grid)
-        verts, faces, _, _ = measure.marching_cubes(pad, 0.5, spacing=(hx, hy, hz))
-        verts -= [hx * 0.5, hy * 0.5, hz * 0.5]       # unpad + half-voxel (cell-centered)
-        if mesh_finish in ("smooth", "g2-polish") and len(faces):   # S5: polish staircase
+    elif solid.any():                                 # plain-solid path: mesh the CONTINUOUS
+        # (filtered) density at SUB-VOXEL resolution — not the binary x≥0.5 staircase. The density
+        # filter already computed a smooth sub-voxel gradient; thresholding threw it away. We keep
+        # it (restricted to the kept component, boundary layer included) and upsample `mesh_detail`×,
+        # so surface smoothness decouples from the coarse solve grid (a fine mesh from a coarse solve).
+        field = np.where(ndimage.binary_dilation(solid, iterations=1), x, 0.0)
+        d = mesh_detail
+        while d > 1 and field.size * d ** 3 > 15_000_000:   # bound the upsampled grid
+            d -= 1
+        if d > 1:
+            field = ndimage.zoom(field, d, order=1)
+        sx, sy, sz = Lx / field.shape[0], Ly / field.shape[1], Lz / field.shape[2]
+        pad = np.pad(field.astype(np.float32), 1)
+        verts, faces, _, _ = measure.marching_cubes(pad, 0.5, spacing=(sx, sy, sz))
+        verts -= [sx * 0.5, sy * 0.5, sz * 0.5]       # unpad + half-voxel (cell-centered)
+        if mesh_finish in ("smooth", "g2-polish") and len(faces):   # S5: extra organic polish
             frozen = None
             if preserve_boxes:                            # Phase 2: keep preserved faces flat
                 frozen = np.zeros(len(verts), bool)
