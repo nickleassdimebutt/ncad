@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nCAD — Nick's generative CAD</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151b23; --raise:#1c242e; --line:#28313d; --line2:#374454;
+    --ink:#dbe2ec; --dim:#8493a5; --faint:#5a6778;
+    --cool:#4fc3f7;   /* parametric / precision / the pulse */
+    --warm:#ff8a5c;   /* structural / load / heat */
+    --ok:#57d38a; --warn:#e8c268; --bad:#ef6b6b;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
+  button{font:inherit;cursor:pointer}
+  ::selection{background:rgba(79,195,247,.28);color:#fff}
+  :focus-visible{outline:2px solid var(--cool);outline-offset:1px}
+
+  /* ---------- header + GPU strip ---------- */
+  .hdr{display:flex;align-items:center;justify-content:space-between;gap:16px;
+       padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+  .brand{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.14em;color:var(--dim);
+         display:flex;align-items:baseline;gap:12px;min-width:0}
+  .brand .n{color:var(--cool)} .brand b{color:var(--ink)}
+  .brand .tag{font-weight:400;font-size:12px;letter-spacing:0;color:var(--warm);
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .26s}
+  .gpu{font-family:var(--mono);font-size:11.5px;color:var(--faint);display:flex;align-items:center;gap:9px;flex:none}
+  .gpu .lbl{letter-spacing:.14em}
+  .gpu .bar{width:44px;height:7px;border-radius:2px;background:var(--line);overflow:hidden;position:relative}
+  .gpu .bar i{position:absolute;inset:0;background:var(--warm);width:38%;
+              animation:gpuidle 1.6s ease-in-out infinite;display:block}
+  .gpu.idle .bar i{background:var(--line2);animation:none;width:100%}
+  .gpu .who{color:var(--dim)} .gpu .who b{color:var(--ink);font-weight:600}
+  @keyframes gpuidle{0%,100%{opacity:.55}50%{opacity:1}}
+
+  /* ---------- three-zone shell ---------- */
+  .shell{flex:1;display:grid;grid-template-columns:224px minmax(0,1fr) 312px;min-height:0}
+  .rail{border-right:1px solid var(--line);background:var(--panel);
+        display:flex;flex-direction:column;min-height:0}
+  .stage{min-width:0;min-height:0;overflow:auto;padding:18px}
+  .dock{border-left:1px solid var(--line);background:var(--panel);
+        display:flex;flex-direction:column;min-height:0;overflow:auto}
+  @media(max-width:1080px){.shell{grid-template-columns:200px minmax(0,1fr)}
+    .dock{display:none}}
+  @media(max-width:720px){.shell{grid-template-columns:1fr}.rail{display:none}}
+
+  /* ---------- rail: job tree ---------- */
+  .railhead{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+            color:var(--faint);padding:14px 14px 8px}
+  #tree{flex:1;overflow:auto;padding:0 8px}
+  .node{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;
+        border:1px solid transparent;color:var(--dim);cursor:pointer;font-size:13px;
+        white-space:nowrap;overflow:hidden}
+  .node:hover{background:var(--raise)}
+  .node.sel{background:var(--raise);border-color:var(--line2);color:var(--ink)}
+  .node .nm{overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .node .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .node .meta{font-family:var(--mono);font-size:9.5px;color:var(--faint);flex:none}
+  .node .meta.best{color:var(--ok)}
+  .child{margin-left:16px;position:relative;font-size:12.5px}
+  .child::before{content:"";position:absolute;left:-9px;top:-4px;height:calc(50% + 4px);
+                 width:8px;border-left:1px solid var(--line2);border-bottom:1px solid var(--line2)}
+  .expand{margin-left:16px;font-family:var(--mono);font-size:10.5px;color:var(--cool);
+          padding:3px 9px;cursor:pointer}
+  .d-done{background:var(--ok)} .d-run{background:var(--cool);box-shadow:0 0 0 3px rgba(79,195,247,.16)}
+  .d-queue{background:var(--warn)} .d-fail{background:var(--bad)} .d-ws{background:var(--faint)}
+  .tray{border-top:1px dashed var(--line);margin:8px 6px 0;padding-top:8px}
+  .tray .tl{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+            color:var(--faint);padding:0 8px 5px;display:flex;gap:6px;align-items:center}
+  .newbtn{margin:10px;padding:9px;border:1px dashed var(--line2);border-radius:8px;background:none;
+          color:var(--cool);font-family:var(--mono);font-size:12px;letter-spacing:.04em;flex:none}
+  .newbtn:hover{border-color:var(--cool);background:rgba(79,195,247,.06)}
+
+  /* ---------- generic controls ---------- */
+  h2.sh{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--faint);
+        font-family:var(--mono);font-weight:600;margin-bottom:10px}
+  label.fl{display:block;font-size:12px;color:var(--dim);margin:12px 0 4px}
+  input,textarea,select{width:100%;background:var(--raise);color:var(--ink);border:1px solid var(--line2);
+    border-radius:6px;padding:7px 9px;font:inherit}
+  input[type=number]{font-family:var(--mono)}
+  textarea{min-height:96px;resize:vertical;line-height:1.55}
+  .btn{width:100%;padding:10px;border:none;border-radius:8px;background:var(--cool);
+       color:#062230;font-weight:700;font-size:14px}
+  .btn:disabled{opacity:.5}
+  .btn.warm{background:var(--warm);color:#20120b}
+  .ghost{background:var(--raise);border:1px solid var(--line2);color:var(--dim);border-radius:6px;padding:6px 12px;font-size:12.5px}
+  .err{color:var(--bad);font-size:12.5px;margin-top:10px;min-height:16px}
+  .hint{color:var(--faint);font-size:12px}
+
+  /* ---------- stage: new / draft ---------- */
+  .card{max-width:640px;margin:0 auto}
+  .card h1{font-size:22px;font-weight:750;letter-spacing:-.01em;margin-bottom:6px}
+  .card .sub{color:var(--dim);margin-bottom:18px;max-width:52ch}
+
+  /* engine segmented control */
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;margin:2px 0}
+  .seg button{padding:7px 18px;background:none;border:none;color:var(--dim);font-weight:600;font-size:13px}
+  .seg button.on{background:var(--raise);color:var(--ink)}
+  .seg button.on.struct{background:var(--warm);color:#20120b}
+  .seg button.on.param{background:var(--cool);color:#062230}
+  .seg.sm button{padding:5px 13px;font-size:12px}
+  .rationale{color:var(--faint);font-size:12px;margin:6px 0 2px;max-width:52ch}
+  #structOpts{border-left:2px solid var(--warm);padding-left:10px;margin:8px 0 2px}
+  /* 2-axis style picker (gate + recipe) */
+  .stylemap{width:100%;max-width:300px;display:block;border-radius:6px}
+  .stylemap circle:hover{stroke:#fff}
+  .stylecap{font-size:11.5px;color:var(--dim);margin-top:5px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;line-height:1.45}
+  .stylecap b{color:var(--ink);font-weight:600}
+  /* adaptive interview: confirm-not-ask gap chips (hard floor = engine + units) */
+  .gapchips{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 14px}
+  .gapchips .gc{font-family:var(--mono);font-size:10.5px;padding:3px 9px;border-radius:999px;
+                border:1px solid var(--line2);color:var(--dim);background:var(--raise)}
+  .gapchips .gc.warm{border-color:var(--warm);color:var(--warm)}
+  .gapchips .gc.cool{border-color:var(--cool);color:var(--cool)}
+  .gapchips .gc.warn{border-color:var(--warn);color:var(--warn)}
+
+  .gaterow{display:grid;grid-template-columns:130px 1fr;gap:8px 16px;align-items:center;margin:6px 0}
+  .gaterow .gk{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right}
+  .conv{font-family:var(--mono);font-size:12px;color:var(--cool)}
+  .feat{display:grid;grid-template-columns:1fr 76px 60px 26px;gap:6px;margin-bottom:6px}
+  .feat button{background:none;border:none;color:var(--bad);font-size:16px}
+  .skel{height:14px;border-radius:4px;background:linear-gradient(90deg,var(--raise),var(--line2),var(--raise));
+        background-size:200% 100%;animation:shim 1.3s linear infinite}
+  @keyframes shim{to{background-position:-200% 0}}
+
+  /* schematic svg */
+  .schematic{background:#080b0f;border:1px solid var(--line);border-radius:8px;margin-top:14px}
+
+  /* ---------- stage: job viewport ---------- */
+  .jobhead{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+  .jobhead .jn{font-size:18px;font-weight:700;letter-spacing:-.01em}
+  .badge{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+         padding:3px 10px;border-radius:999px}
+  .b-run{background:#123040;color:var(--cool);animation:pulse 1.3s infinite}
+  .b-done{background:#10331f;color:var(--ok)} .b-fail{background:#3a1a1a;color:var(--bad)}
+  .b-queue{background:#332a15;color:var(--warn)} .b-ws{background:#241f3a;color:#a99bf0}
+  @keyframes pulse{50%{opacity:.5}}
+  .stylepill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
+             padding:3px 10px 3px 6px;border-radius:999px;border:1px solid var(--line2);color:var(--dim)}
+  .sw{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--line2);flex:none}
+  .spacer{flex:1}
+
+  .viewport{position:relative;background:#080b0f;border:1px solid var(--line2);border-radius:10px;
+            aspect-ratio:16/9;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .viewport img{max-width:100%;max-height:100%;display:block}
+  /* two stacked layers → cross-fade between frames (topo camera is fixed, so the
+     structure grows IN PLACE). fade must be ≪ the poll interval. */
+  .viewport .vlayer{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;
+                    transition:opacity .45s ease;background:#080b0f}
+  /* live compliance / material sparklines (structural) */
+  .spark{margin-top:10px;display:flex;flex-direction:column;gap:5px}
+  .spk{display:grid;grid-template-columns:78px 1fr 46px;gap:9px;align-items:center;
+       font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .spk svg{width:100%;height:30px;display:block;background:var(--raise);border-radius:4px}
+  .spk b{text-align:right;font-variant-numeric:tabular-nums}
+  /* parametric spec-diff mini-bars: measured vs target, center = on-spec */
+  .specdiff{display:flex;flex-direction:column;gap:5px}
+  .sd{display:grid;grid-template-columns:14px 1fr 56px;gap:9px;align-items:center;
+      font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .sd .sdbar{position:relative;height:8px;background:var(--raise);border-radius:4px}
+  .sd .sdbar u{position:absolute;left:50%;top:-1px;width:1px;height:10px;background:var(--line2)}
+  .sd .sdbar i{position:absolute;top:1px;width:6px;height:6px;border-radius:50%;transform:translateX(-50%);transition:left .4s}
+  .sd .sdbar i.ok{background:var(--ok)} .sd .sdbar i.off{background:var(--warn)}
+  .sd b{text-align:right}.sd b.okc{color:var(--ok)}.sd b.offc{color:var(--warn)}
+  .viewport .wash{position:absolute;inset:0;background:rgba(8,11,15,.55);
+                  display:flex;align-items:flex-end;gap:10px;padding:12px 14px;font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .viewport .wash .sp{width:16px;height:16px;border-radius:50%;border:2px solid var(--line2);
+                      border-top-color:var(--cool);animation:spin .9s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .viewport .pinned{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:11px;
+                    background:rgba(79,195,247,.16);color:var(--cool);border:1px solid var(--cool);
+                    border-radius:999px;padding:4px 11px;animation:pulse 1.3s infinite}
+  /* revision compare: structural = draggable wipe (fixed camera registers), parametric = side-by-side */
+  .cmp{position:absolute;inset:0}
+  .cmp img.cmp-base,.cmp img.cmp-cur{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+  .cmp .cmp-div{position:absolute;top:0;bottom:0;width:2px;background:var(--cool);cursor:ew-resize;touch-action:none}
+  .cmp .cmp-div::after{content:"⇔";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                       background:var(--cool);color:#062230;border-radius:10px;font-size:11px;padding:1px 6px}
+  .cmp .cmp-l{position:absolute;bottom:8px;font-family:var(--mono);font-size:10px;
+              background:rgba(8,11,15,.72);padding:2px 7px;border-radius:4px;color:var(--ink)}
+  .cmp .cl{left:8px}.cmp .cr{right:8px}
+  .cmp-sbs{position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .cmp-sbs figure{position:relative;min-width:0}
+  .cmp-sbs img{width:100%;height:100%;object-fit:contain}
+  .cmp-sbs figcaption{position:absolute;bottom:6px;left:6px;font-family:var(--mono);font-size:10px;
+                      background:rgba(8,11,15,.72);padding:2px 6px;border-radius:4px;color:var(--dim)}
+  .cmpdelta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .cmpdelta .cd{font-family:var(--mono);font-size:11px;background:var(--raise);border:1px solid var(--line);
+                border-radius:6px;padding:3px 9px;font-variant-numeric:tabular-nums}
+
+  /* progress: stage-rail (param) + i/N bar (struct) */
+  .prog{margin-top:12px;display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .pips{display:flex;gap:7px;align-items:center}
+  .pips .pp{display:flex;gap:5px;align-items:center}
+  .pips .pd{width:8px;height:8px;border-radius:50%;background:var(--line2)}
+  .pips .pd.on{background:var(--cool)} .pips .pd.done{background:var(--ok)}
+  .pips .ar{color:var(--line2)}
+  .ibar{flex:1;height:7px;border-radius:4px;background:var(--raise);overflow:hidden;min-width:80px}
+  .ibar i{display:block;height:100%;background:var(--warm);transition:width .4s}
+
+  /* filmstrip */
+  .film{display:flex;gap:8px;overflow-x:auto;margin-top:14px;padding-bottom:4px;max-width:100%}
+  .fr{flex:0 0 108px;background:var(--raise);border:1px solid var(--line);border-radius:7px;padding:5px;cursor:pointer}
+  .fr.sel{border-color:var(--cool)}
+  .fr img{width:100%;border-radius:3px;background:#080b0f;display:block;aspect-ratio:16/10;object-fit:cover}
+  .fr .cap{display:flex;justify-content:space-between;margin-top:4px;font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+  .fr .pass{color:var(--ok)} .fr .fail{color:var(--bad)} .fr .evo{color:var(--warm)}
+  .filmctl{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .filmctl button{font-family:var(--mono);font-size:11px;color:var(--dim);background:var(--raise);
+                  border:1px solid var(--line2);border-radius:6px;padding:4px 10px}
+
+  .failbox{margin-top:12px;border:1px solid var(--bad);border-left-width:3px;border-radius:8px;
+           padding:10px 13px;background:rgba(239,107,107,.06);font-family:var(--mono);font-size:12px;color:var(--bad);white-space:pre-wrap}
+
+  /* ---------- dock: recipe + metrics + log ---------- */
+  .dsec{padding:14px 15px;border-bottom:1px solid var(--line)}
+  .metric{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim);padding:2px 0}
+  .metric b{color:var(--ink);font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .links{display:flex;gap:14px;margin-top:8px}
+  .links a{color:var(--cool);text-decoration:none;font-size:12.5px}
+  .rc .rl{display:flex;justify-content:space-between;gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px solid rgba(40,49,61,.5)}
+  .rc .rk{color:var(--dim);font-size:12.5px} .rc .rv{color:var(--ink);text-align:right;font-family:var(--mono);font-size:12px}
+  .rc input{width:64px;padding:3px 5px;font-size:11.5px;display:inline-block}
+  .rc .grp{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cool);margin:12px 0 5px}
+  .rc .box6{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+  .rc .box6 label{font-size:9.5px;color:var(--faint);width:auto;margin:0}
+  .rc .box6 input{width:48px}
+  .rc .sen{font-size:11.5px;color:var(--dim);margin:8px 0 2px}
+  /* structural face-picker: click a cube face to snap a support/load region */
+  .rc .faces{display:flex;gap:3px;margin:5px 0 2px}
+  .rc .faces button{flex:1;background:var(--raise);border:1px solid var(--line2);color:var(--dim);
+    border-radius:4px;padding:4px 0;font-size:10px;font-family:var(--mono);line-height:1}
+  .rc .faces button.on{background:var(--warm);color:#20120b;border-color:var(--warm)}
+  .rc .faces button:hover{border-color:var(--warm)}
+  /* progressive disclosure: primary vs fine-control param groups + edited tags */
+  .rc .tag{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;padding:1px 5px;border-radius:999px;
+           margin-left:6px;vertical-align:middle}
+  .rc .tag.auto{background:var(--raise);color:var(--faint)}
+  .rc .tag.edited{background:#123040;color:var(--cool)}
+  .rc .rlabel{color:var(--dim);font-size:12.5px}
+  pre.log{background:#080b0f;border:1px solid var(--line);border-radius:7px;padding:9px;
+          font:11px/1.5 var(--mono);height:150px;overflow:auto;color:var(--faint);
+          white-space:pre-wrap;word-break:break-word;margin-top:8px}
+  .empty{color:var(--faint);text-align:center;padding:70px 20px;font-size:14px}
+
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="brand"><span class="n">n</span><b>CAD</b><span class="tag" id="tag">a bench you never leave.</span></div>
+    <div class="gpu idle" id="gpu"><span class="lbl">GPU</span><span class="bar"><i></i></span><span class="who">idle</span></div>
+  </div>
+  <div class="shell">
+    <aside class="rail">
+      <div class="railhead">Projects</div>
+      <div id="tree"></div>
+      <button class="newbtn" id="newbtn">+ New part</button>
+    </aside>
+    <main class="stage" id="stage"></main>
+    <aside class="dock" id="dock"></aside>
+  </div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const el = (t, c, h) => { const e = document.createElement(t); if(c) e.className = c; if(h!=null) e.innerHTML = h; return e; };
+const esc = s => { const d = document.createElement("div"); d.textContent = s==null?"":s; return d.innerHTML; };
+const escAttr = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+const reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+const NOMINAL = { structural:130, stack:15, "llm-direct":180, mock:3 };  // seconds, for ETA
+const RUNNING = new Set(["queued","configuring","generating","building","verifying","optimizing"]);
+const ACTIVE = new Set(["configuring","generating","building","verifying","optimizing"]);
+const STAGE_TEXT = { configuring:"configuring the design…", generating:"writing the script…",
+  building:"building the STEP…", verifying:"measuring against your spec…",
+  optimizing:"evolving the structure…", queued:"waiting for the GPU…" };
+
+const S = { jobs:[], status:{active:null,queue:[],now:0}, statusAt:0,
+  sel:null, selIter:null, session:null, mode:"empty",
+  expanded:{}, stageKind:null, stageJob:null, dockKey:null, film:{}, play:null, vfront:"A", compare:false,
+  styles:null };
+/* aesthetic style presets (loaded once) + lookup for the job's chosen style */
+async function loadStyles(){ try{ const r=await fetch("/api/styles"); S.styles=await r.json(); }catch(e){} }
+function styleKey(j){ return (j&&j.config&&j.config.style)||(j&&j.style)||null; }
+function styleOf(j){ const k=styleKey(j); return (k&&S.styles&&S.styles.styles&&S.styles.styles[k])||null; }
+function safeHex(v,fb){ return (typeof v==="string"&&/^#[0-9a-fA-F]{3,8}$/.test(v))?v:(fb||"#8493a5"); }
+function styleSwatch(pal){ return '<span class="sw" style="background:'+safeHex(pal&&pal.render_hex)+
+  ';border-color:'+safeHex(pal&&pal.edge_hex)+'"></span>'; }
+
+/* ---------------- polling ---------------- */
+async function poll(){
+  try{
+    const [jr,wr,sr] = await Promise.all([fetch("/api/jobs"),fetch("/api/workspace"),fetch("/api/status")]);
+    const real = await jr.json(), ws = await wr.json(); S.status = await sr.json(); S.statusAt = Date.now()/1000;
+    const names = new Set(real.map(j=>j.name));
+    const wsJobs = ws.filter(p=>!names.has(p.name)).map(p=>({
+      id:"ws-"+p.name, name:p.name, state:"workspace", generator:"workspace",
+      created:p.updated, updated:p.updated, log:[],
+      iterations:p.versions.map(v=>({iteration:v.version,label:v.label,passed:null,
+        metrics:v.metrics,preview:v.preview,step:v.step,viewer:v.viewer}))}));
+    S.jobs = mergeJobs(real.concat(wsJobs));
+  }catch(e){ /* keep last state on a hiccup */ }
+  renderChrome();
+  renderMain();
+  // parametric bursts are fast (~1s/iter) → poll quicker; structural evolves
+  // every ~2s so 2s keeps the cross-fade smooth without hammering.
+  const activeJobs = S.jobs.filter(j=>RUNNING.has(j.state));
+  const hasParam = activeJobs.some(j=>j.generator!=="structural");
+  clearTimeout(poll._t); poll._t = setTimeout(poll, hasParam?1200 : activeJobs.length?2000 : 4000);
+}
+function job(id){ return S.jobs.find(j=>j.id===id); }
+function selected(){ return job(S.sel); }
+// upsert by id + preserve a just-submitted job until the server copy appears,
+// so an in-flight poll can't drop it or a duplicate can't slip in
+function mergeJobs(list){
+  const seen=new Set(), out=[];
+  for(const j of list){ if(!seen.has(j.id)){ seen.add(j.id); out.push(j); } }
+  if(S.pendingJob){ if(seen.has(S.pendingJob.id)) S.pendingJob=null; else out.unshift(S.pendingJob); }
+  return out;
+}
+
+/* ---------------- GPU strip (ticks every second) ---------------- */
+function nowServer(){ return S.status.now + (Date.now()/1000 - S.statusAt); }
+function fmtDur(s){ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+function renderGpu(){
+  const g = $("#gpu"), a = S.status.active;
+  if(!a){ g.className="gpu idle"; g.innerHTML='<span class="lbl">GPU</span><span class="bar"><i></i></span><span class="who">idle</span>'; return; }
+  const el2 = a.started ? nowServer()-a.started : 0;
+  const rem = Math.max(0, (NOMINAL[a.generator]||60) - el2);
+  g.className="gpu";
+  g.innerHTML = '<span class="lbl">GPU</span><span class="bar"><i></i></span>'+
+    '<span class="who"><b>'+esc(a.name)+'</b> · '+esc(a.state)+' · '+fmtDur(el2)+' <span style="color:var(--faint)">(~'+fmtDur(rem)+' left)</span></span>';
+}
+setInterval(()=>{ if(S.status.active) renderGpu(); }, 1000);
+
+/* queue position + ETA for a queued job */
+function queueInfo(j){
+  const q = S.status.queue||[]; const i = q.indexOf(j.id);
+  if(i<0) return null;
+  let eta = 0; const a = S.status.active;
+  if(a) eta += Math.max(0,(NOMINAL[a.generator]||60)-(a.started?nowServer()-a.started:0));
+  for(let k=0;k<i;k++){ const qj=job(q[k]); eta += NOMINAL[qj?qj.generator:"stack"]||60; }
+  return { pos:i+1, eta };
+}
+
+/* ---------------- rail: nested revision tree ---------------- */
+function baseName(n){ return n.replace(/-r\d+$/,""); }
+function renderChrome(){
+  renderGpu();
+  const tree = $("#tree"); tree.innerHTML="";
+  const real = S.jobs.filter(j=>j.state!=="workspace");
+  const groups = {};   // root id -> [jobs]   (explicit lineage, not name-parsing)
+  for(const j of real){ (groups[j.root||baseName(j.name)] ||= []).push(j); }
+  // order groups by most-recent activity
+  const order = Object.keys(groups).sort((a,b)=>
+    Math.max(...groups[b].map(j=>j.updated||j.created)) - Math.max(...groups[a].map(j=>j.updated||j.created)));
+  for(const key of order){
+    const list = groups[key].slice().sort((a,b)=>(a.created||0)-(b.created||0));
+    const parent = list.find(j=>j.id===key) || list[0];
+    const revs = list.filter(j=>j!==parent);
+    // variant gallery: mark the stiffest (lowest compliance) finished sibling
+    let bestId=null, bestC=Infinity;
+    if(list.length>1) for(const j of list){ const c=finalCompliance(j);
+      if(j.state==="done"&&c!=null&&c<bestC){ bestC=c; bestId=j.id; } }
+    tree.appendChild(nodeEl(parent, false, null, parent.id===bestId));
+    const open = S.expanded[key];
+    const shown = open ? revs : revs.slice(-1);
+    if(!open && revs.length>1)
+      tree.appendChild(expandEl(key, revs.length));
+    for(const r of shown) tree.appendChild(nodeEl(r, true, parent, r.id===bestId));
+    if(open && revs.length>1) tree.appendChild(expandEl(key, revs.length, true));
+  }
+  const wsJobs = S.jobs.filter(j=>j.state==="workspace");
+  if(wsJobs.length){
+    const tray = el("div","tray"); tray.appendChild(el("div","tl","🔒 from workspace"));
+    for(const j of wsJobs) tray.appendChild(nodeEl(j,false));
+    tree.appendChild(tray);
+  }
+}
+function dotClass(state){
+  if(state==="workspace") return "d-ws";
+  if(state==="queued") return "d-queue";
+  if(ACTIVE.has(state)) return "d-run";
+  if(state==="failed"||state==="error"||state==="canceled") return "d-fail";
+  return "d-done";
+}
+function finalCompliance(j){
+  const its=j.iterations||[];
+  for(let i=its.length-1;i>=0;i--){ const m=its[i].metrics; if(m&&m.compliance!=null) return +m.compliance; }
+  return null;
+}
+function nodeLabel(j){
+  const vl=j.config&&j.config.variant_label;
+  const v=j.name.match(/-v(\d+)$/), r=j.name.match(/-r(\d+)$/);
+  return vl || (v?("v"+v[1]) : r?("r"+r[1]) : "rev");
+}
+function nodeEl(j, child, parent, best){
+  const n = el("div","node"+(child?" child":"")+(j.id===S.sel?" sel":""));
+  let meta = j.state;
+  const comp = finalCompliance(j);
+  if(j.state==="queued"){ const q=queueInfo(j); if(q) meta = q.pos+"· ~"+fmtDur(q.eta); }
+  else if(j.generator==="structural" && j.state==="done" && comp!=null){ meta = (best?"★ ":"")+"C "+(comp<1?comp.toFixed(2):comp.toFixed(1)); }
+  else if(child && parent && parent.config && j.config){ meta = revDiff(parent.config,j.config)||"rev"; }
+  const label = child ? nodeLabel(j) : j.name;
+  n.innerHTML = '<span class="dot '+dotClass(j.state)+'"></span>'+
+    '<span class="nm">'+esc(label)+'</span><span class="meta'+(best?" best":"")+'">'+esc(meta)+'</span>';
+  n.onclick = ()=>selectJob(j.id);
+  return n;
+}
+function expandEl(base, total, collapse){
+  const e = el("div","expand", collapse?"▲ collapse":("+"+(total-1)+" revisions ▾"));
+  e.onclick = ()=>{ S.expanded[base]=!S.expanded[base]; renderChrome(); };
+  return e;
+}
+/* one-line config diff (child vs parent) */
+function revDiff(a,b){
+  const out=[];
+  if(a.engine==="structural"&&b.engine==="structural"){
+    if(a.volfrac!==b.volfrac) out.push("kept "+Math.round(a.volfrac*100)+"→"+Math.round(b.volfrac*100)+"%");
+    for(let i=0;i<3;i++) if(a.domain_mm&&b.domain_mm&&a.domain_mm[i]!==b.domain_mm[i]){ out.push("xyz"[i]+" "+a.domain_mm[i]+"→"+b.domain_mm[i]); break; }
+  } else if(a.params&&b.params){
+    for(const k of Object.keys(b.params)) if(a.params[k]!==b.params[k]){ out.push(k+" "+a.params[k]+"→"+b.params[k]); if(out.length>=2)break; }
+  }
+  return out.join(" · ");
+}
+
+/* ---------------- selection + mode ---------------- */
+function selectJob(id){ S.sel=id; S.selIter=null; S.session=null; S.mode="job"; S.compare=false; stopPlay(); renderMain(true); }
+$("#newbtn").onclick = ()=>{ S.sel=null; S.selIter=null; S.session=null; S.mode="new"; renderMain(true); };
+
+/* ---------------- main render (stage + dock) ---------------- */
+function renderMain(force){
+  let kind = S.mode;
+  if(kind==="job" && !selected()){ kind = S.jobs.length?"job":"empty"; if(!selected()&&S.jobs.length){ S.sel=S.jobs[0].id; } }
+  if(kind==="empty" && S.jobs.length && S.mode!=="new"){ S.sel=S.jobs[0].id; S.mode="job"; kind="job"; }
+  renderStage(kind, force);
+  renderDock(kind);
+}
+
+/* ---------- STAGE ---------- */
+function renderStage(kind, force){
+  const stage = $("#stage");
+  const jid = kind==="job" ? S.sel : null;
+  const remount = force || S.stageKind!==kind || (kind==="job" && S.stageJob!==jid);
+  if(kind==="new"){ if(remount){ mountNew(); S.stageKind="new"; S.stageJob=null; } return; }
+  if(kind==="drafting"||kind==="draft"){ if(remount) mountGate(); S.stageKind=kind; return; }
+  if(kind==="empty"){ stage.innerHTML='<div class="empty">No parts yet.<br>Hit <b style="color:var(--cool)">+ New part</b> to describe one.</div>'; S.stageKind="empty"; return; }
+  // job
+  const j = selected();
+  if(remount){ mountJob(j); S.stageKind="job"; S.stageJob=jid; }
+  updateJob(j);
+}
+
+function mountNew(){
+  S.stageKind="new"; stopPlay();
+  $("#stage").innerHTML = '<div class="card">'+
+    '<h1>Describe the part</h1>'+
+    '<div class="sub">Plain English — sizes in any units, loads, what it mounts to, what matters. The local model drafts a spec; you confirm before it runs.</div>'+
+    '<label class="fl">Project name</label><input id="nName" placeholder="shelf-bracket">'+
+    '<label class="fl">What do you want?</label>'+
+    '<textarea id="nReq" placeholder="A shelf bracket that holds 300 lb. Screw holes to bolt it to a wall. Protrudes only 3&quot; from the wall, no more than 4&quot; tall. Low mass, easy to 3D print."></textarea>'+
+    '<button class="btn" id="nGo" style="margin-top:14px">Draft the spec →</button>'+
+    '<div class="err" id="nErr"></div></div>';
+  $("#nGo").onclick = startDraft;
+  $("#nReq").focus();
+}
+
+async function startDraft(){
+  const name = $("#nName").value, req = $("#nReq").value.trim();
+  if(!req){ $("#nErr").textContent="Describe the part first."; return; }
+  $("#nErr").textContent="";
+  S.session = { name, req, spec:null };
+  S.mode="drafting"; renderMain(true);          // skeleton immediately — no blank wait
+  try{
+    const r = await fetch("/api/sessions",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,request:req})});
+    const j = await r.json(); if(!r.ok) throw new Error(j.error);
+    S.session.id = j.id;
+    const r2 = await fetch("/api/sessions/"+j.id+"/answers",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({answers:{}})});
+    const j2 = await r2.json(); if(!r2.ok) throw new Error(j2.error);
+    S.session.spec = j2.spec; S.mode="draft"; renderMain(true);
+  }catch(e){ S.mode="new"; mountNew(); $("#nErr").textContent = "Draft failed: "+e.message; }
+}
+
+function mountGate(){
+  const stage=$("#stage"), sp=S.session&&S.session.spec;
+  if(!sp){   // slice 6: skeleton confirm gate while the model drafts
+    stage.innerHTML='<div class="card"><h1>Reading your brief…</h1>'+
+      '<div class="sub">The local model is drafting a spec from your description. This is the one expensive step — everything after is deterministic.</div>'+
+      Array(5).fill('<div class="skel" style="margin:10px 0"></div>').join("")+
+      '<div class="hint" style="margin-top:8px">configuring…</div></div>';
+    S.stageKind="drafting"; return;
+  }
+  sp.quality = sp.quality||"draft"; sp.creativity = sp.creativity||"focused"; sp.style = sp.style||null;
+  const eng = sp.engine;
+  const feats = (sp.features||[]).map((f,i)=>featRow(f,i)).join("");
+  stage.innerHTML='<div class="card"><h1>Here’s what I understood</h1>'+
+    '<div class="sub">Edit anything, then run. The engine and any unit conversions are always worth a glance — they’re the two errors that waste a whole solve.</div>'+
+    '<div class="gapchips" id="gapChips"></div>'+
+    '<div class="gaterow"><span class="gk">Engine</span><span>'+
+      '<span class="seg" id="segEng">'+
+        '<button class="'+(eng==="structural"?"on struct":"")+'" data-e="structural">Structural</button>'+
+        '<button class="'+(eng==="stack"?"on param":"")+'" data-e="stack">Parametric</button>'+
+      '</span><div class="rationale" id="engWhy"></div></span></div>'+
+    '<div class="gaterow"><span class="gk">Style</span><div id="gStyle"></div></div>'+
+    '<div id="structOpts"'+(eng==="structural"?"":' style="display:none"')+'>'+
+      '<div class="gaterow"><span class="gk">Quality</span><span>'+
+        segHTML("qual",[["draft","Draft"],["balanced","Balanced"],["fine","Fine"]],sp.quality)+
+        '<div class="rationale" id="qualWhy"></div></span></div>'+
+      '<div class="gaterow"><span class="gk">Creativity</span><span>'+
+        segHTML("crea",[["focused","Focused"],["explore","Explore"],["wild","Wild"]],sp.creativity)+
+        '<div class="rationale" id="creaWhy"></div></span></div>'+
+    '</div>'+
+    '<div class="gaterow"><span class="gk">Design space</span><span>'+
+      ["x","y","z"].map(a=>'<input type="number" step="any" value="'+(sp.bbox[a]??"")+'" id="gb_'+a+'" style="width:78px;display:inline-block">').join(' <span class="conv">×</span> ')+
+      ' <span class="conv">mm</span></span></div>'+
+    '<div class="gaterow"><span class="gk">Objective</span><input id="gObj" value="'+escAttr(sp.objective||"")+'"></div>'+
+    '<div class="gaterow"><span class="gk">Holes / features</span><div id="gFeats">'+(feats||'<span class="hint">none</span>')+'</div></div>'+
+    '<div style="margin-left:146px;margin-top:2px"><button class="ghost" id="gAddF">+ add feature</button></div>'+
+    schematicSVG(sp)+
+    '<div style="display:flex;gap:12px;margin-top:18px"><button class="ghost" id="gBack">← edit brief</button>'+
+      '<button class="btn '+(eng==="structural"?"warm":"")+'" id="gRun" style="flex:1">Run '+(eng==="structural"?"topology solve":"build")+' →</button></div>'+
+    '<div class="err" id="gErr"></div></div>';
+  wireGate();
+}
+function featRow(f,i){
+  return '<div class="feat" data-fi="'+i+'"><input value="'+escAttr(f.name||"")+'" data-k="name">'+
+    '<input type="number" step="any" value="'+(f.diameter_mm??"")+'" data-k="diameter_mm" placeholder="⌀mm">'+
+    '<input type="number" min="1" value="'+(f.count??"")+'" data-k="count" placeholder="n">'+
+    '<button title="remove" onclick="this.parentNode.remove()">×</button></div>';
+}
+/* small neutral segmented control (quality / creativity) */
+function segHTML(name,opts,cur){
+  return '<span class="seg sm" data-seg="'+name+'">'+opts.map(([v,lab])=>
+    '<button class="'+(v===cur?"on":"")+'" data-v="'+escAttr(v)+'">'+esc(lab)+'</button>').join("")+'</span>';
+}
+function wireSeg(name,onpick){
+  const bs=[...document.querySelectorAll('[data-seg="'+name+'"] button')];
+  bs.forEach(b=>b.onclick=()=>{ bs.forEach(x=>x.className=x===b?"on":""); onpick(b.dataset.v); });
+}
+const QSECS={draft:130,balanced:340,fine:820};      // rough per-solve seconds, for ETA
+const CVAR={focused:1,explore:3,wild:6};             // variant count per creativity level
+/* deterministic gap-check → confirm-not-ask chips. Hard floor: always surface
+   engine + units; flag an inferred size when the brief carried no numbers. */
+function renderGapChips(){
+  const box=$("#gapChips"); if(!box) return;
+  const sp=S.session.spec, req=((S.session&&S.session.req)||"").toLowerCase(), chips=[];
+  chips.push({t:"engine · "+(sp.engine==="structural"?"structural":"parametric"), c:sp.engine==="structural"?"warm":"cool"});
+  const styd=sp.style&&S.styles&&S.styles.styles&&S.styles.styles[sp.style];
+  if(styd) chips.push({t:"style · "+styd.label, c:""});
+  const imperial=/inch|inches|"|feet|foot|\bft\b|'/.test(req);
+  chips.push({t:imperial?"units · mm ← imperial":"units · mm", c:"cool"});
+  if(!/\d/.test(req)) chips.push({t:"size inferred — confirm below", c:"warn"});
+  const holes=(sp.features||[]).reduce((n,f)=>n+(+f.count||0),0);
+  if(holes) chips.push({t:holes+" hole"+(holes>1?"s":"")+" detected", c:""});
+  box.innerHTML=chips.map(ch=>'<span class="gc '+ch.c+'">'+esc(ch.t)+'</span>').join("");
+}
+/* 2-axis style picker — round↔faceted (x) × skin-solid↔skeletal (y), palette dots,
+   spine dashed, engine-affinity dimming. Calls onpick(key|null) on click (toggle). */
+function renderStyleMap(mount, current, engine, onpick){
+  if(!mount) return;
+  const data=S.styles;
+  if(!data||!data.styles){ mount.innerHTML='<span class="hint">styles unavailable</span>'; return; }
+  const styles=data.styles;
+  const keys=Object.keys(styles).filter(k=>styles[k]&&styles[k].axis&&styles[k].palette);
+  const spine=(data.spine||[]).filter(k=>keys.includes(k));
+  const W=260,H=148, mx=16, my=14;
+  const px=k=>mx+styles[k].axis.form*(W-2*mx), py=k=>my+(1-styles[k].axis.mass)*(H-2*my);
+  const spinePts=spine.map(k=>px(k).toFixed(0)+","+py(k).toFixed(0)).join(" ");
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" class="stylemap">'+
+    '<rect x="1" y="1" width="'+(W-2)+'" height="'+(H-2)+'" rx="6" fill="#080b0f" stroke="var(--line)"/>'+
+    '<line x1="'+(W/2)+'" y1="8" x2="'+(W/2)+'" y2="'+(H-8)+'" stroke="var(--line)"/>'+
+    '<line x1="8" y1="'+(H/2)+'" x2="'+(W-8)+'" y2="'+(H/2)+'" stroke="var(--line)"/>'+
+    '<text x="'+(W-6)+'" y="'+(H-5)+'" text-anchor="end" font-size="7.5" fill="var(--faint)">faceted</text>'+
+    '<text x="6" y="'+(H-5)+'" font-size="7.5" fill="var(--faint)">round</text>'+
+    '<text x="6" y="12" font-size="7.5" fill="var(--faint)">skeletal</text>';
+  if(spinePts) svg+='<polyline points="'+spinePts+'" fill="none" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3 2"/>';
+  for(const k of keys){ const s=styles[k], on=k===current;
+    const dim = engine && s.engine_affinity!=="either" && s.engine_affinity!==engine;
+    svg+='<circle data-sk="'+escAttr(k)+'" cx="'+px(k).toFixed(1)+'" cy="'+py(k).toFixed(1)+'" r="'+(on?8:6)+'" '+
+      'fill="'+safeHex(s.palette.render_hex)+'" stroke="'+(on?"#ffffff":safeHex(s.palette.edge_hex))+'" '+
+      'stroke-width="'+(on?2.5:1.8)+'" opacity="'+(dim?"0.3":"1")+'" style="cursor:pointer">'+
+      '<title>'+esc(s.label)+(dim?" (prefers "+esc(s.engine_affinity)+")":"")+'</title></circle>'; }
+  svg+='</svg>';
+  mount.innerHTML=svg+'<div class="stylecap"></div>';
+  const drawCap=cur=>{ const c=mount.querySelector(".stylecap"), s=cur&&styles[cur];
+    c.innerHTML = s ? styleSwatch(s.palette)+'<b>'+esc(s.label)+'</b><span class="hint">· '+esc(s.finish)+' — '+esc(s.blurb)+'</span>'
+      : '<span class="hint">no style · plain engine output (click a dot to apply; click it again to clear)</span>'; };
+  drawCap(current);
+  mount.querySelectorAll("[data-sk]").forEach(c=>c.onclick=()=>{
+    current = (current===c.dataset.sk)?null:c.dataset.sk;
+    mount.querySelectorAll("[data-sk]").forEach(d=>{ const on=d.dataset.sk===current;
+      d.setAttribute("r", on?8:6); d.setAttribute("stroke", on?"#ffffff":safeHex(styles[d.dataset.sk].palette.edge_hex));
+      d.setAttribute("stroke-width", on?"2.5":"1.8"); });
+    drawCap(current); onpick(current);
+  });
+}
+/* a picked style pre-fills the Quality knob (its preferred fidelity) at the gate */
+function applyStylePrefill(k){
+  const sp=S.session&&S.session.spec, s=k&&S.styles&&S.styles.styles&&S.styles.styles[k];
+  if(!sp||!s) return;
+  const qp=s.structural&&s.structural.quality_pref;
+  if(qp && ["draft","balanced","fine"].includes(qp)){
+    sp.quality=qp;
+    document.querySelectorAll('[data-seg="qual"] button').forEach(b=>b.className=b.dataset.v===qp?"on":"");
+    updateGateNotes();
+  }
+}
+function updateGateNotes(){
+  const sp=S.session.spec, q=sp.quality||"draft", c=sp.creativity||"focused";
+  const qw=$("#qualWhy"); if(qw) qw.textContent={draft:"Coarse mesh — fast, chunky.",
+    balanced:"Medium mesh — a solid default.",fine:"Fine mesh — slow, lean, more organic."}[q];
+  const n=CVAR[c], cw=$("#creaWhy");
+  if(cw) cw.textContent = n>1
+    ? n+" divergent variants, solved back-to-back (~"+fmtDur(n*QSECS[q])+" total). Compare compliance in the tree."
+    : "One optimal solve.";
+  const run=$("#gRun");
+  if(run && sp.engine==="structural") run.textContent = (n>1?("Run "+n+" variants"):"Run topology solve")+" →";
+}
+function wireGate(){
+  const sp=S.session.spec;
+  const drawStyleMap = ()=>renderStyleMap($("#gStyle"), sp.style, sp.engine, k=>{ sp.style=k; applyStylePrefill(k); renderGapChips(); });
+  const setEng = e=>{
+    sp.engine=e;
+    for(const b of document.querySelectorAll("#segEng button")){
+      const on=b.dataset.e===e; b.className = on?("on "+(e==="structural"?"struct":"param")):"";
+    }
+    $("#engWhy").textContent = e==="structural"
+      ? "Structural — grows minimal material along the load paths. Best when you gave a load, not a fixed shape."
+      : "Parametric — an exact editable shape from a template. Best for plates, flanges, enclosures with precise faces.";
+    $("#structOpts").style.display = e==="structural"?"":"none";
+    const run=$("#gRun"); run.className="btn "+(e==="structural"?"warm":"");
+    if(e==="structural") updateGateNotes(); else run.textContent="Run build →";
+    renderGapChips(); drawStyleMap();      // dimming follows the engine
+  };
+  document.querySelectorAll("#segEng button").forEach(b=>b.onclick=()=>setEng(b.dataset.e));
+  wireSeg("qual",v=>{ sp.quality=v; updateGateNotes(); });
+  wireSeg("crea",v=>{ sp.creativity=v; updateGateNotes(); });
+  setEng(sp.engine);
+  applyStylePrefill(sp.style);   // the LLM's default style also seeds the Quality knob
+  $("#gAddF").onclick=()=>{ const d=el("div"); d.innerHTML=featRow({},0); $("#gFeats").querySelector(".hint")?.remove(); $("#gFeats").appendChild(d.firstChild); };
+  $("#gBack").onclick=()=>{ S.mode="new"; mountNew(); $("#nName").value=S.session.name; $("#nReq").value=S.session.req; };
+  $("#gRun").onclick=runDraft;
+}
+async function runDraft(){
+  const sp=S.session.spec;
+  const bbox={}; for(const a of ["x","y","z"]){ const v=$("#gb_"+a).value; if(v!=="") bbox[a]=+v; }
+  const features=[...document.querySelectorAll("#gFeats .feat")].map(d=>{
+    const o={}; d.querySelectorAll("input").forEach(i=>o[i.dataset.k]=i.value); return o;
+  }).filter(f=>f.diameter_mm&&f.count);
+  const body={engine:sp.engine, bbox, features, objective:$("#gObj").value,
+    quality:sp.quality, creativity:sp.creativity, style:sp.style};
+  $("#gErr").textContent=""; $("#gRun").disabled=true;
+  try{
+    const r=await fetch("/api/sessions/"+S.session.id+"/run",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const j=await r.json(); if(!r.ok) throw new Error(j.error);
+    S.pendingJob=j; S.jobs=mergeJobs([j].concat(S.jobs));   // honest optimistic append
+    S.expanded[j.root||j.id]=true;   // reveal fan-out variants as they queue
+    selectJob(j.id); renderChrome();
+  }catch(e){ $("#gRun").disabled=false; $("#gErr").textContent="Run failed: "+e.message; }
+}
+
+/* schematic wireframe from bbox+features — fills space, never blank */
+function schematicSVG(sp){
+  const b=sp.bbox||{}; const x=b.x||60,y=b.y||40,z=b.z||20;
+  const W=260,H=150,pad=30; const sc=Math.min((W-2*pad)/(x+y*0.5),(H-2*pad)/(z+y*0.5));
+  const dx=x*sc, dz=z*sc, dy=y*0.5*sc;
+  const ox=pad, oy=H-pad-dy;
+  const holes=(sp.features||[]).reduce((n,f)=>n+(+f.count||0),0);
+  let hc=""; const nh=Math.min(holes,8);
+  for(let i=0;i<nh;i++){ const cx=ox+dx*((i+1)/(nh+1)), cy=oy-dz/2; hc+='<circle cx="'+cx.toFixed(0)+'" cy="'+cy.toFixed(0)+'" r="4" fill="#080b0f" stroke="'+(sp.engine==="structural"?"#ff8a5c":"#4fc3f7")+'" stroke-width="1.4"/>'; }
+  const col=sp.engine==="structural"?"#ff8a5c":"#4fc3f7";
+  return '<svg class="schematic" width="100%" height="150" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+
+    '<rect x="'+ox+'" y="'+oy+'" width="'+dx+'" height="'+dz+'" fill="none" stroke="'+col+'" stroke-width="1.5"/>'+
+    '<path d="M'+ox+' '+oy+' l'+dy+' -'+dy+' h'+dx+' l-'+dy+' '+dy+'" fill="none" stroke="'+col+'" stroke-width="1" opacity=".55"/>'+
+    '<path d="M'+(ox+dx)+' '+oy+' l'+dy+' -'+dy+' v'+dz+' l-'+dy+' '+dy+'" fill="none" stroke="'+col+'" stroke-width="1" opacity=".55"/>'+
+    hc+'<text x="'+ox+'" y="'+(H-8)+'" fill="#5a6778" font-family="ui-monospace,monospace" font-size="9">'+x+' × '+y+' × '+z+' mm'+(holes?(" · "+holes+" holes"):"")+'</text></svg>';
+}
+
+/* ---------- JOB stage (mount once, update in place) ---------- */
+function mountJob(j){
+  stopPlay(); S.film[j.id]=0; S.vfront="A";
+  $("#stage").innerHTML =
+    '<div class="jobhead"><span class="jn" id="jName"></span><span class="badge" id="jBadge"></span>'+
+    '<span class="stylepill" id="jStyle" style="display:none"></span>'+
+    '<span class="spacer"></span><button class="ghost" id="jCmp" style="display:none">⇔ compare</button>'+
+    '<button class="ghost" id="jCancel">✕ cancel</button></div>'+
+    '<div class="viewport"><img id="jImgA" class="vlayer" alt="" style="opacity:1">'+
+      '<img id="jImgB" class="vlayer" alt="" style="opacity:0">'+
+      '<div class="cmp" id="jCompare" style="display:none"></div>'+
+      '<div class="wash" id="jWash" style="display:none"><span class="sp"></span><span id="jWashT"></span></div>'+
+      '<div class="pinned" id="jPin" style="display:none">● pinned — jump to live</div></div>'+
+    '<div class="cmpdelta" id="jCmpDelta" style="display:none"></div>'+
+    '<div class="prog" id="jProg"></div>'+
+    '<div class="spark" id="jSpark" style="display:none"></div>'+
+    '<div id="jSpec" style="display:none;margin-top:10px"></div>'+
+    '<div class="failbox" id="jFail" style="display:none"></div>'+
+    '<div class="filmctl" id="jFilmctl" style="display:none"><button id="jPlay">▶ play</button>'+
+      '<span class="hint" id="jScrub"></span><span class="hint">·  ←/→ step</span></div>'+
+    '<div class="film" id="jFilm"></div>';
+  $("#jCancel").onclick = async ()=>{ if(S.sel&&!S.sel.startsWith("ws-")){ await fetch("/api/jobs/"+S.sel+"/cancel",{method:"POST"}); poll(); } };
+  $("#jPin").onclick = ()=>{ S.selIter=null; stopPlay(); updateJob(selected()); };
+  $("#jPlay").onclick = togglePlay;
+  $("#jCmp").onclick = ()=>{ S.compare=!S.compare; updateJob(selected()); };
+}
+/* cross-fade the viewport to a new frame url (fixed camera ⇒ registers in place) */
+function showFrame(url){
+  const a=$("#jImgA"), b=$("#jImgB"); if(!a||!b) return;
+  const front = S.vfront==="B"?b:a, back = S.vfront==="B"?a:b;
+  if(front.dataset.src===url) return;                 // already the live layer
+  const swap=()=>{ back.style.opacity=1; front.style.opacity=0; S.vfront=(S.vfront==="B")?"A":"B"; };
+  if(back.dataset.src===url){ swap(); return; }        // preloaded → just cross-fade
+  back.onload=swap; back.onerror=null; back.src=url; back.dataset.src=url;
+}
+function iterList(j){ return j.iterations||[]; }
+function shownIter(j){ const its=iterList(j);
+  return S.selIter!=null ? its.find(i=>i.iteration===S.selIter) : its[its.length-1]; }
+
+function updateJob(j){
+  if(!j) return;
+  $("#jName").textContent = j.name;
+  const bd=$("#jBadge"); bd.textContent=j.state; bd.className="badge "+badgeClass(j.state);
+  $("#jCancel").style.display = RUNNING.has(j.state)?"":"none";
+  // style badge + viewport accent (S1)
+  const st=styleOf(j), sp=$("#jStyle");
+  if(sp){ if(st){ sp.style.display=""; sp.innerHTML=styleSwatch(st.palette)+esc(st.label); }
+    else sp.style.display="none"; }
+  const vp=$(".viewport"); if(vp) vp.style.borderColor = (st&&st.palette)?safeHex(st.palette.edge_hex):"";
+  const its=iterList(j), shown=shownIter(j), pinned=S.selIter!=null;
+
+  // viewport: cross-fade to the latest good frame (fixed camera ⇒ grows in place)
+  if(shown&&shown.preview) showFrame("/files/"+shown.preview+"?t="+j.updated);
+  const running=ACTIVE.has(j.state);
+  const wash=$("#jWash");
+  wash.style.display = (running && !pinned)?"":"none";
+  if(running&&!pinned) $("#jWashT").textContent = STAGE_TEXT[j.state]||j.state;
+  $("#jPin").style.display = (pinned && RUNNING.has(j.state))?"":"none";
+
+  // progress + live sparklines (structural) + spec-diff bars (parametric)
+  renderProg(j);
+  renderSpark(j);
+  renderSpecDiff(j);
+
+  // failure
+  const fb=$("#jFail");
+  if((j.state==="failed"||j.state==="error"||j.state==="canceled")){
+    fb.style.display=""; fb.textContent = failReason(j);
+  } else fb.style.display="none";
+
+  // filmstrip: diff-append
+  renderFilm(j);
+
+  // scrub controls (structural: many frames)
+  const fc=$("#jFilmctl");
+  fc.style.display = its.length>3 ? "" : "none";
+
+  // revision compare (child vs its root/parent) — both sides need a final frame
+  const base=baselineJob(j), canCmp=base && !RUNNING.has(j.state) && !!finalFrame(j);
+  const cmpBtn=$("#jCmp");
+  if(cmpBtn){ cmpBtn.style.display = canCmp?"":"none";
+    cmpBtn.textContent = (S.compare&&canCmp)?"✕ exit compare":"⇔ compare"; }
+  if(!canCmp && S.compare) S.compare=false;
+  renderCompare(j, base, canCmp);
+  const dl=$("#jCmpDelta");
+  if(dl){ if(S.compare&&canCmp){ dl.style.display=""; dl.innerHTML=compareDelta(j,base); } else dl.style.display="none"; }
+}
+/* the natural baseline for a variant/revision is its root (original) job */
+function baselineJob(j){
+  if(!j||!j.root||j.root===j.id) return null;
+  const b=job(j.root);
+  return (b&&b.id!==j.id&&finalFrame(b))?b:null;
+}
+function finalFrame(j){ const its=iterList(j); for(let i=its.length-1;i>=0;i--) if(its[i].preview) return its[i]; return null; }
+function finalMetrics(j){ const its=iterList(j); for(let i=its.length-1;i>=0;i--) if(its[i].metrics) return its[i].metrics; return null; }
+function renderCompare(j, base, active){
+  const box=$("#jCompare"); if(!box) return;
+  const on = S.compare && active;
+  [$("#jImgA"),$("#jImgB")].forEach(im=>{ if(im) im.style.visibility = on?"hidden":""; });
+  const cur=finalFrame(j), bf=base&&finalFrame(base);
+  if(!on||!cur||!bf){ box.style.display="none"; box.dataset.k="";
+    [$("#jImgA"),$("#jImgB")].forEach(im=>{ if(im) im.style.visibility=""; }); return; }
+  box.style.display="";
+  const curU="/files/"+cur.preview+"?t="+j.updated, baseU="/files/"+bf.preview+"?t="+base.updated;
+  const k=j.id+"|"+base.id;
+  if(box.dataset.k===k) return;                        // already built for this pair
+  if(j.generator==="structural"){                      // fixed camera ⇒ wipe divider
+    box.innerHTML='<img class="cmp-base" alt="" src="'+escAttr(baseU)+'">'+
+      '<img class="cmp-cur" alt="" src="'+escAttr(curU)+'" style="clip-path:inset(0 50% 0 0)">'+
+      '<div class="cmp-div" style="left:50%"></div>'+
+      '<span class="cmp-l cl">'+esc(base.name)+'</span><span class="cmp-l cr">'+esc(nodeLabel(j))+'</span>';
+    wipeDrag(box);
+  } else {                                              // parametric ⇒ side-by-side
+    box.innerHTML='<div class="cmp-sbs"><figure><img alt="" src="'+escAttr(baseU)+'"><figcaption>'+esc(base.name)+'</figcaption></figure>'+
+      '<figure><img alt="" src="'+escAttr(curU)+'"><figcaption>'+esc(nodeLabel(j))+'</figcaption></figure></div>';
+  }
+  box.dataset.k=k;
+}
+function wipeDrag(box){
+  const div=box.querySelector(".cmp-div"), cur=box.querySelector(".cmp-cur");
+  const set=cx=>{ const r=box.getBoundingClientRect(); const p=Math.max(0,Math.min(1,(cx-r.left)/r.width));
+    div.style.left=(p*100)+"%"; cur.style.clipPath="inset(0 "+((1-p)*100).toFixed(1)+"% 0 0)"; };
+  let drag=false;
+  div.onpointerdown=e=>{ drag=true; div.setPointerCapture(e.pointerId); e.preventDefault(); };
+  div.onpointermove=e=>{ if(drag) set(e.clientX); };
+  div.onpointerup=div.onpointercancel=()=>{ drag=false; };
+  box.onclick=e=>{ if(!e.target.classList.contains("cmp-div")) set(e.clientX); };
+}
+function compareDelta(j,base){
+  const a=finalMetrics(base), b=finalMetrics(j), chips=[]; if(!a||!b) return "";
+  const chip=(label,d,fmtAbs,lowerBetter)=>{ if(d==null||isNaN(d)) return;
+    const neutral=Math.abs(d)<1e-9, good=lowerBetter?d<0:d>0;
+    const col=lowerBetter==null?"var(--cool)":neutral?"var(--dim)":(good?"var(--ok)":"var(--bad)");
+    chips.push('<span class="cd" style="color:'+col+'">'+label+' '+(neutral?"=":(d<0?"▼":"▲"))+
+      ' '+(d>0?"+":d<0?"−":"")+fmtAbs(Math.abs(d))+'</span>'); };
+  if(j.generator==="structural"){
+    // compliance is the honest optimality signal (lower = stiffer); material &
+    // volume are informational context (a leaner variant isn't automatically better).
+    if(a.compliance!=null&&b.compliance!=null) chip("compliance",b.compliance-a.compliance,v=>v<1?v.toFixed(3):v.toFixed(2),true);
+    if(a.vol_fraction!=null&&b.vol_fraction!=null) chip("material",b.vol_fraction-a.vol_fraction,v=>Math.round(v*100)+"pp",null);
+    if(a.mesh_volume_mm3!=null&&b.mesh_volume_mm3!=null) chip("volume",(b.mesh_volume_mm3-a.mesh_volume_mm3)/1000,v=>v.toFixed(2)+"cm³",null);
+  } else {
+    const ad=a.dimensions,bd=b.dimensions;
+    if(ad&&bd) for(const ax of ["x","y","z"]) if(ad[ax]!=null&&bd[ax]!=null&&Math.abs(bd[ax]-ad[ax])>1e-6) chip(ax,bd[ax]-ad[ax],v=>v.toFixed(2)+"mm",null);
+    if(a.volume!=null&&b.volume!=null) chip("volume",(b.volume-a.volume)/1000,v=>v.toFixed(2)+"cm³",null);
+  }
+  return chips.join("")||'<span class="cd" style="color:var(--dim)">identical metrics</span>';
+}
+function badgeClass(s){ if(ACTIVE.has(s))return "b-run"; if(s==="queued")return "b-queue";
+  if(s==="workspace")return "b-ws"; if(s==="failed"||s==="error"||s==="canceled")return "b-fail"; return "b-done"; }
+function failReason(j){
+  const last=iterList(j).slice(-1)[0];               // prefer the structured reason
+  if(last&&(last.error||last.feedback)) return last.error||last.feedback;
+  const l=(j.log||[]);
+  for(let i=l.length-1;i>=0;i--){ if(/error|fail|invalid|reject|timeout|timed out|not finish|no chat model|traceback|wedged|missing|stopped|abort/i.test(l[i]))
+    return l[i].replace(/^\[[^\]]*\]\s*/,""); }
+  return ((l.slice(-1)[0])||"stopped").replace(/^\[[^\]]*\]\s*/,"");
+}
+function renderProg(j){
+  const p=$("#jProg"); const its=iterList(j);
+  if(j.generator==="structural"){
+    const cur=its.length, tot=Math.max(cur, 50);
+    p.innerHTML='<span>i '+cur+'/'+tot+'</span>'+
+      '<div class="ibar"><i style="width:'+Math.min(100,cur/tot*100)+'%"></i></div>'+
+      (j.state==="optimizing"?'<span style="color:var(--warm)">compliance ↓</span>':'');
+  } else if(RUNNING.has(j.state)||j.state==="done"||j.state==="failed"){
+    const stages=["configuring","building","verifying","done"];
+    const idx = j.state==="done"?4 : j.state==="failed"?3 : {configuring:1,generating:1,building:2,verifying:3,queued:0}[j.state]||0;
+    p.innerHTML='<span class="pips">'+stages.map((s,i)=>
+      '<span class="pp"><span class="pd '+(i<idx?"done":(i===idx-1?"on":""))+'"></span>'+s+'</span>'+
+      (i<stages.length-1?'<span class="ar">→</span>':'')).join("")+'</span>';
+  } else p.innerHTML="";
+}
+/* live sparklines: compliance (should fall) + material fraction (holds target) */
+function sparkPts(vals){
+  const n=vals.length, W=250,H=30, mn=Math.min(...vals), mx=Math.max(...vals), rng=(mx-mn)||1;
+  return vals.map((v,i)=>((n<2?0:i/(n-1))*W).toFixed(1)+","+(H-3-((v-mn)/rng)*(H-6)).toFixed(1)).join(" ");
+}
+function sparkRow(label,vals,color,cur){
+  return '<div class="spk"><span>'+label+'</span>'+
+    '<svg viewBox="0 0 250 30" preserveAspectRatio="none"><polyline points="'+sparkPts(vals)+
+      '" fill="none" stroke="'+color+'" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>'+
+    '<b style="color:'+color+'">'+cur+'</b></div>';
+}
+function renderSpark(j){
+  const box=$("#jSpark"); if(!box) return;
+  const its=iterList(j).filter(i=>i.metrics&&i.metrics.compliance!=null&&i.metrics.vol_fraction!=null);
+  if(j.generator!=="structural"||its.length<2){ box.style.display="none"; box.innerHTML=""; return; }
+  box.style.display="";
+  const comp=its.map(i=>+i.metrics.compliance), vol=its.map(i=>+i.metrics.vol_fraction);
+  const c=comp[comp.length-1], v=vol[vol.length-1];
+  box.innerHTML = sparkRow("compliance ↓",comp,"var(--warm)",c<1?c.toFixed(2):c.toFixed(1))+
+    sparkRow("material",vol,"var(--cool)",Math.round(v*100)+"%");
+}
+/* parametric: how close each measured dimension is to its target (center=on-spec) */
+function renderSpecDiff(j){
+  const box=$("#jSpec"); if(!box) return;
+  const shown=shownIter(j), m=shown&&shown.metrics, d=m&&m.dimensions, b=j.bbox||{};
+  const axes=d?["x","y","z"].filter(a=>b[a]!=null&&d[a]!=null):[];
+  if(j.generator==="structural"||!axes.length){ box.style.display="none"; box.innerHTML=""; return; }
+  box.style.display="";
+  const tol=j.bbox_tol||0.5;
+  box.innerHTML='<div class="hint" style="font-size:10px;margin-bottom:4px">measured vs target — center is on-spec (±'+tol+'mm)</div><div class="specdiff">'+
+    axes.map(a=>{ const err=d[a]-b[a], within=Math.abs(err)<=tol;
+      const pct=Math.max(-1,Math.min(1,err/((b[a]*0.1)||1)));   // full scale = ±10% of target
+      return '<div class="sd"><span>'+a+'</span><div class="sdbar"><u></u>'+
+        '<i class="'+(within?"ok":"off")+'" style="left:'+(50+pct*50).toFixed(1)+'%"></i></div>'+
+        '<b class="'+(within?"okc":"offc")+'">'+(err>=0?"+":"")+err.toFixed(2)+'</b></div>';
+    }).join("")+'</div>';
+}
+function renderFilm(j){
+  const film=$("#jFilm"); const its=iterList(j);
+  const have=S.film[j.id]||0;
+  if(its.length<have){ film.innerHTML=""; S.film[j.id]=0; }   // shrank (new job reuse) → reset
+  for(let i=(S.film[j.id]||0); i<its.length; i++){
+    const it=its[i]; film.appendChild(frEl(j,it));
+  }
+  S.film[j.id]=its.length;
+  // refresh selection highlight + badges of already-mounted frames
+  [...film.children].forEach((c,i)=>{ const it=its[i]; if(!it) return;
+    c.className="fr"+((shownIter(j)&&it.iteration===shownIter(j).iteration)?" sel":"");
+    const im=c.querySelector("img"); if(it.preview&&im){ const u="/files/"+it.preview+"?t="+j.updated;
+      if(im.dataset.k!==String(it.iteration)){ im.src=u; im.dataset.k=String(it.iteration); } }
+  });
+}
+function frEl(j,it){
+  const d=el("div","fr");
+  const badge = it.passed ? '<span class="pass">✓</span>' :
+    it.passed===null ? '<span>v'+it.iteration+'</span>' :
+    (j.generator==="structural"&&it.label!=="final") ? '<span class="evo">⟳</span>' :
+    it.error ? '<span class="fail">✗</span>' : '<span class="fail">✗</span>';
+  d.innerHTML = (it.preview?'<img alt="">':'<div style="aspect-ratio:16/10"></div>')+
+    '<div class="cap"><span>'+esc(it.label||("iter "+it.iteration))+'</span>'+badge+'</div>';
+  d.onclick=()=>{ S.selIter=it.iteration; stopPlay(); updateJob(selected()); };
+  return d;
+}
+/* play/scrub the stored frames */
+function togglePlay(){ if(S.play) stopPlay(); else startPlay(); }
+function startPlay(){
+  const j=selected(); const its=iterList(j); if(its.length<2) return;
+  $("#jPlay").textContent="❚❚ pause";
+  let i=0;
+  S.play=setInterval(()=>{ S.selIter=its[i].iteration; updateJob(j);
+    $("#jScrub").textContent="frame "+(i+1)+"/"+its.length;
+    i=(i+1)%its.length; }, reduce?400:180);
+}
+function stopPlay(){ if(S.play){ clearInterval(S.play); S.play=null; const b=$("#jPlay"); if(b)b.textContent="▶ play"; const s=$("#jScrub"); if(s)s.textContent=""; } }
+/* arrow-key scrubbing through stored frames (last frame == live) */
+document.addEventListener("keydown",e=>{
+  if(S.mode!=="job") return;
+  if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||"")) return;
+  if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return;
+  const j=selected(); if(!j) return; const its=iterList(j); if(its.length<2) return;
+  e.preventDefault(); stopPlay();
+  let idx = S.selIter!=null ? its.findIndex(i=>i.iteration===S.selIter) : its.length-1;
+  if(idx<0) idx=its.length-1;
+  idx = Math.max(0, Math.min(its.length-1, idx + (e.key==="ArrowRight"?1:-1)));
+  S.selIter = (idx===its.length-1) ? null : its[idx].iteration;
+  updateJob(j);
+  const sc=$("#jScrub"); if(sc) sc.textContent = S.selIter==null ? "live" : ("frame "+(idx+1)+"/"+its.length);
+  const sel=$("#jFilm")&&$("#jFilm").querySelector(".fr.sel");
+  if(sel&&sel.scrollIntoView) sel.scrollIntoView({inline:"center",block:"nearest"});
+});
+
+/* ---------- DOCK: recipe + metrics + log ---------- */
+function renderDock(kind){
+  const dock=$("#dock");
+  if(kind!=="job"){ dock.innerHTML='<div class="dsec"><div class="empty" style="padding:40px 10px">The recipe appears here once a part is built.</div></div>'; S.dockKey=null; return; }
+  const j=selected(); if(!j){ dock.innerHTML=""; return; }
+  const shown=shownIter(j);
+  const key=j.id+":"+j.state+":"+JSON.stringify(j.config||null);
+  const metricsHtml = metricsBlock(j,shown);
+  const logHtml = '<div class="dsec"><h2 class="sh">Engineer log</h2><pre class="log" id="dLog"></pre></div>';
+  if(S.dockKey!==key){
+    // rebuild (config or state changed) — safe: not editing mid-run
+    dock.innerHTML='<div class="dsec" id="dRecipe"></div>'+
+      '<div class="dsec" id="dMetrics"></div>'+logHtml;
+    S.dockKey=key; renderRecipe(j);
+  }
+  $("#dMetrics").innerHTML=metricsHtml;
+  const lg=$("#dLog"); if(lg){ const atEnd=lg.scrollTop+lg.clientHeight>=lg.scrollHeight-8;
+    lg.textContent=(j.log||[]).join("\n"); if(atEnd) lg.scrollTop=lg.scrollHeight; }
+}
+function metricsBlock(j,shown){
+  let h='<h2 class="sh">Result</h2>';
+  const m=shown&&shown.metrics;
+  if(m&&m.dimensions){ const d=m.dimensions;
+    h+='<div class="metric"><span>dimensions</span><b>'+d.x+' × '+d.y+' × '+d.z+' mm</b></div>'+
+       '<div class="metric"><span>volume</span><b>'+(m.volume/1000).toFixed(2)+' cm³</b></div>'+
+       '<div class="metric"><span>valid solid</span><b>'+(m.is_valid?"yes":"NO")+'</b></div>';
+  } else if(m){
+    h+='<div class="metric"><span>compliance</span><b>'+(m.compliance!=null?(+m.compliance).toFixed(3):"—")+'</b></div>'+
+       '<div class="metric"><span>material kept</span><b>'+(m.vol_fraction!=null?Math.round(m.vol_fraction*100)+"%":"—")+'</b></div>'+
+       (m.mesh_volume_mm3?'<div class="metric"><span>material</span><b>'+(m.mesh_volume_mm3/1000).toFixed(1)+' cm³</b></div>':"");
+  } else h+='<div class="hint">building…</div>';
+  const fileHref = p => '/files/'+encodeURI(p).replace(/"/g,"%22");
+  const links=[]; if(shown&&shown.step)links.push('<a href="'+fileHref(shown.step)+'">↓ STEP</a>');
+  if(shown&&shown.stl)links.push('<a href="'+fileHref(shown.stl)+'">↓ STL</a>');
+  if(shown&&shown.viewer)links.push('<a href="'+fileHref(shown.viewer)+'" target="_blank">↗ 3D viewer</a>');
+  if(links.length) h+='<div class="links">'+links.join("")+'</div>';
+  if(shown&&shown.passed) h+='<div style="color:var(--ok);font-size:12.5px;margin-top:8px">✓ all requirements met</div>';
+  return h;
+}
+
+/* -------- recipe editor (LLM-free revision) -------- */
+const DIRS=[["[0,0,-1]","↓ pressing down"],["[0,0,1]","↑ pulling up"],
+  ["[1,0,0]","→ pushing +x"],["[-1,0,0]","← pushing −x"],["[0,1,0]","pushing +y"],["[0,-1,0]","pushing −y"]];
+function regionSentence(box){
+  const ax=["x","y","z"],names=[];
+  for(let i=0;i<3;i++){ const a=box[i],b=box[i+3];
+    if(b-a<=0.05){ if(a<=0.02)names.push({x:"the left face",y:"the front face",z:"the bottom face"}[ax[i]]);
+      else if(b>=0.98)names.push({x:"the right face",y:"the back face",z:"the top face"}[ax[i]]);
+      else names.push("mid "+ax[i]); }
+    else if(a>0.02||b<0.98) names.push(ax[i]+" "+Math.round(a*100)+"–"+Math.round(b*100)+"%"); }
+  return names.length?names.join(", "):"the whole body";
+}
+function box6(kind,idx,box){ const cells=["x0","x1","y0","y1","z0","z1"],order=[0,3,1,4,2,5];
+  return '<div class="box6">'+order.map((oi,k)=>'<label>'+cells[k]+
+    '<input type="number" min="0" max="100" value="'+Math.round(box[oi]*100)+'" data-r="'+kind+'-'+idx+'-'+oi+'"></label>').join("")+'</div>'; }
+/* direct manipulation: click a cube face to snap a support/load to canonical 0..1 box */
+const FACES=[["left","◧ left",[0,0,0,0.06,1,1]],["right","right ◨",[0.94,0,0,1,1,1]],
+  ["front","front",[0,0,0,1,0.06,1]],["back","back",[0,0.94,0,1,1,1]],
+  ["bottom","▼ floor",[0,0,0,1,1,0.06]],["top","top ▲",[0,0,0.94,1,1,1]]];
+function faceOf(box){ for(const f of FACES){ if(f[2].every((v,i)=>Math.abs(v-box[i])<0.02)) return f[0]; } return null; }
+function facePicker(kind,idx,box){
+  const cur=faceOf(box);
+  return '<div class="faces" data-fp="'+kind+'-'+idx+'">'+FACES.map(f=>
+    '<button type="button" class="'+(f[0]===cur?"on":"")+'" data-f="'+f[0]+'">'+esc(f[1])+'</button>').join("")+'</div>';
+}
+function wireFaces(){
+  document.querySelectorAll("[data-fp]").forEach(fp=>{
+    const dash=fp.dataset.fp.lastIndexOf("-"), kind=fp.dataset.fp.slice(0,dash), idx=fp.dataset.fp.slice(dash+1);
+    fp.querySelectorAll("button").forEach(btn=>btn.onclick=()=>{
+      const slab=FACES.find(f=>f[0]===btn.dataset.f)[2];
+      for(let o=0;o<6;o++){ const inp=$('[data-r="'+kind+'-'+idx+'-'+o+'"]'); if(inp) inp.value=Math.round(slab[o]*100); }
+      fp.querySelectorAll("button").forEach(b=>b.className=b===btn?"on":"");
+    });
+  });
+}
+/* progressive disclosure: plain-language labels + primary/fine grouping for parametric */
+const PARAM_LABELS={length:"length",width:"width",thickness:"thickness",corner_fillet:"corner fillet r",edge_chamfer:"edge chamfer",flutes:"flutes (reeding)",pockets:"lightening pockets",
+  bore_d:"bore ⌀",hole_d:"hole ⌀",hole_n:"hole count",pattern:"hole pattern",circle_d:"bolt-circle ⌀",
+  grid_dx:"grid pitch x",grid_dy:"grid pitch y",grid_nx:"holes across",grid_ny:"holes down",
+  od:"outer ⌀",bolt_d:"bolt ⌀",bolt_n:"bolt count",bcd:"bolt-circle ⌀",hub_d:"hub ⌀",hub_h:"hub height",
+  outer_x:"outer width (x)",outer_y:"outer depth (y)",outer_z:"outer height (z)",wall:"wall thickness",floor:"floor thickness"};
+const PRIMARY_PARAMS=new Set(["length","width","thickness","od","outer_x","outer_y","outer_z",
+  "bore_d","hole_d","hole_n","bolt_d","bolt_n","wall"]);
+function paramRow(k,v,baseParams){
+  const edited = baseParams && baseParams[k]!=null && +baseParams[k]!==+v;
+  const tag = '<span class="tag '+(edited?"edited":"auto")+'">'+(edited?"edited":"auto")+'</span>';
+  return '<div class="rl"><span class="rlabel">'+esc(PARAM_LABELS[k]||k)+tag+'</span>'+
+    '<span class="rv"><input type="number" step="any" value="'+escAttr(v)+'" data-r="param-'+escAttr(k)+'"></span></div>';
+}
+function renderRecipe(j){
+  const wrap=$("#dRecipe"); const cfg=j.config;
+  if(!cfg||RUNNING.has(j.state)){ wrap.innerHTML='<h2 class="sh">Recipe</h2><div class="hint">available when the build finishes.</div>'; return; }
+  let h='<h2 class="sh">Design recipe</h2><div class="hint" style="margin-bottom:8px">Edit the numbers, then run a revision — no LLM, ~seconds.</div><div class="rc">';
+  if(S.styles&&S.styles.styles) h+='<div class="grp">Style — restyle & re-run (no LLM)</div><div id="rStyleMap"></div>';
+  if(cfg.engine==="structural"){
+    h+='<div class="rl"><span class="rk">design space</span><span class="rv">'+
+       ["x","y","z"].map((a,i)=>'<input type="number" step="any" value="'+cfg.domain_mm[i]+'" data-r="dom-'+i+'">').join(" × ")+'</span></div>'+
+       '<div class="rl"><span class="rk">keep material</span><span class="rv"><input type="number" min="10" max="60" value="'+Math.round(cfg.volfrac*100)+'" data-r="volfrac"> %</span></div>'+
+       '<div class="rl"><span class="rk">quality</span><span class="rv"><select data-r="quality" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+         ['draft','balanced','fine'].map(q=>'<option value="'+q+'"'+((cfg.quality||"draft")===q?" selected":"")+'>'+q+'</option>').join("")+'</select></span></div>'+
+       (cfg.seed!=null?'<div class="rl"><span class="rk">seed</span><span class="rv">'+esc(cfg.seed)+(cfg.variant_label?" · "+esc(cfg.variant_label):"")+'</span></div>':'');
+    (cfg.supports||[]).forEach((s,i)=>{ h+='<div class="sen">🔒 <b style="color:var(--ink)">Fixed:</b> '+regionSentence(s.box)+'</div>'+facePicker("sup",i,s.box)+box6("sup",i,s.box); });
+    (cfg.loads||[]).forEach((l,i)=>{ const dv=JSON.stringify(l.dir.map(v=>Math.round(v*100)/100));
+      const opts=DIRS.map(([v,lab])=>'<option value=\''+v+'\' '+(v===dv?"selected":"")+'>'+lab+'</option>').join("")+
+        (DIRS.some(([v])=>v===dv)?"":'<option value=\''+dv+'\' selected>custom</option>');
+      h+='<div class="sen">⬇ <b style="color:var(--ink)">Load:</b> '+regionSentence(l.box)+' <select data-r="dir-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select></div>'+facePicker("load",i,l.box)+box6("load",i,l.box); });
+  } else if(cfg.template){
+    const bj=baselineJob(j), baseParams=(bj&&bj.config&&bj.config.params)||null;
+    const entries=Object.entries(cfg.params);
+    const prim=entries.filter(([k])=>PRIMARY_PARAMS.has(k)), fine=entries.filter(([k])=>!PRIMARY_PARAMS.has(k));
+    h+='<div class="hint" style="margin-bottom:6px">template: <b style="color:var(--ink)">'+esc(cfg.template)+'</b></div>';
+    h+='<div class="grp">Primary</div>'+(prim.length?prim:entries).map(([k,v])=>paramRow(k,v,baseParams)).join("");
+    if(prim.length && fine.length)
+      h+='<div class="expand" id="showAll" data-total="'+entries.length+'" style="margin-left:0;padding:7px 0">+ show all '+entries.length+' fields ▾</div>'+
+         '<div id="fineGrp" style="display:none"><div class="grp">Fine control</div>'+fine.map(([k,v])=>paramRow(k,v,baseParams)).join("")+'</div>';
+  }
+  h+='</div><button class="btn" id="dRev" style="margin-top:12px">Run revision →</button><div class="err" id="dRevErr"></div>';
+  wrap.innerHTML=h;
+  $("#dRev").onclick=runRevision;
+  wireFaces();
+  const sa=$("#showAll"); if(sa) sa.onclick=()=>{ const g=$("#fineGrp"), open=g.style.display!=="none";
+    g.style.display=open?"none":""; sa.textContent = open?("+ show all "+sa.dataset.total+" fields ▾"):"▲ hide fine controls"; };
+  wrap.dataset.style = styleKey(j)||"";
+  renderStyleMap($("#rStyleMap"), styleKey(j), cfg.engine, k=>{ wrap.dataset.style=k||""; });
+}
+async function runRevision(){
+  const j=selected(); if(!j||!j.config) return;
+  const cfg=JSON.parse(JSON.stringify(j.config)); const g=s=>$('[data-r="'+s+'"]');
+  if(cfg.engine==="structural"){
+    cfg.domain_mm=[0,1,2].map(i=>+g("dom-"+i).value); cfg.volfrac=+g("volfrac").value/100;
+    const qs=g("quality"); if(qs) cfg.quality=qs.value;
+    (cfg.supports||[]).forEach((s,i)=>{for(let o=0;o<6;o++){const e=g("sup-"+i+"-"+o); if(e)s.box[o]=+e.value/100;}});
+    (cfg.loads||[]).forEach((l,i)=>{for(let o=0;o<6;o++){const e=g("load-"+i+"-"+o); if(e)l.box[o]=+e.value/100;} l.dir=JSON.parse(g("dir-"+i).value);});
+  } else { for(const k of Object.keys(cfg.params)){const e=g("param-"+k); if(e)cfg.params[k]=+e.value;} }
+  const rs=$("#dRecipe").dataset.style; if(rs) cfg.style=rs; else delete cfg.style;   // restyle (S2)
+  $("#dRev").disabled=true; $("#dRevErr").textContent="";
+  try{
+    const r=await fetch("/api/jobs/"+j.id+"/revise",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({config:cfg})});
+    const nj=await r.json(); if(!r.ok) throw new Error(nj.error);
+    S.pendingJob=nj; S.jobs=mergeJobs([nj].concat(S.jobs));
+    S.expanded[nj.root||baseName(nj.name)]=true; selectJob(nj.id); renderChrome();
+  }catch(e){ $("#dRev").disabled=false; $("#dRevErr").textContent=e.message; }
+}
+
+/* ---------------- tagline (tone as data) ---------------- */
+const LINES=["a bench you never leave.","the compute is the animation.","one recipe, seen at every depth.",
+  "the expensive step happens once.","nothing lies about the GPU.","edit the numbers, run a revision."];
+let li=0; if(!reduce) setInterval(()=>{ li=(li+1)%LINES.length; const t=$("#tag");
+  t.style.opacity=0; setTimeout(()=>{ t.textContent=LINES[li]; t.style.opacity=1; },260); }, 4200);
+
+loadStyles();
+poll();
+</script>
+</body>
+</html>

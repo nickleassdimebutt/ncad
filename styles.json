@@ -1,0 +1,163 @@
+{
+  "_readme": "nCAD aesthetic STYLE presets. A style is a bundle of geometry-biasing rules the DETERMINISTIC stack applies on top of whatever the engine produces. The LLM picks a style ONCE at the confirm gate (overridable); it is stored on the recipe as job.config.style so a revision can restyle with NO LLM call. Every field applies where it can and is ignored where it can't (a stack-only style forced onto the structural engine still colors + biases what it's able to). Edit hexes/ranges freely — this file is inert data.",
+  "version": 1,
+  "axes": {
+    "form": { "label": "form", "min": "round", "max": "faceted", "doc": "0 = tangent/organic rounds, 1 = planar facets & sharp arrises" },
+    "mass": { "label": "mass", "min": "skin-solid", "max": "skeletal", "doc": "0 = solid closed walls, 1 = grown/cellular open load-paths" }
+  },
+  "spine": ["bones", "evolved-elegance", "gothic"],
+  "spine_doc": "Bones (raw grown) → Evolved Elegance (refined grown) → Gothic (grown structure re-expressed as ornament). Highlight this arc in the picker.",
+  "field_doc": {
+    "engine_affinity": "structural | stack | either — nudges the gate's auto engine choice (does not force it).",
+    "axis": "{form,mass} in 0..1 — position on the 2-axis picker.",
+    "edge.fillet_policy": "none | tool-radius | uniform | tangent-blend | g2 — increasing roundness/continuity.",
+    "edge.chamfer_policy": "none | edge-break | top-edges | facet | fine-arris | overhang-45.",
+    "edge.edge_break_mm": "cosmetic break on otherwise-sharp edges.",
+    "edge.corner_radius_mm": "the ONE reused radius for the 'uniform' policy (null otherwise).",
+    "edge.chamfer_mm": "chamfer size when chamfer_policy applies (null otherwise).",
+    "structural.volfrac": "[lo,hi] target material fraction; the stack clamps the working volfrac into this band (recipe still overrides).",
+    "structural.quality_pref": "draft | balanced | fine | null — pre-selects the Quality knob at the gate (user can change).",
+    "structural.penal": "SIMP penalization (default 3.0); higher = crisper 0/1 members.",
+    "structural.symmetry": "none | mirror | axial | mirror-axial — enforced by averaging the density field each iteration.",
+    "structural.z_bias": "1.0 = none; >1 stretches load-paths vertically (verticality); <1 flattens.",
+    "structural.mesh_finish": "faceted | as-is | smooth | g2-polish — post-process on the marching-cubes mesh (the 'fillet policy' for the organic engine).",
+    "feature_language": "ribs | flutes | pockets | lattice | tracery | taper | facets — additive/subtractive geometry ops (deepest slice).",
+    "palette": "{render_hex, edge_hex} — viewport + STL/STEP preview color.",
+    "finish": "implied real-world finish (label + tone hint; no geometry)."
+  },
+
+  "styles": {
+    "bones": {
+      "label": "Bones",
+      "blurb": "Grown skeletal load-paths, biomimetic.",
+      "engine_affinity": "structural",
+      "axis": { "form": 0.10, "mass": 0.92 },
+      "edge": { "fillet_policy": "g2", "chamfer_policy": "none", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": null },
+      "structural": { "volfrac": [0.12, 0.18], "quality_pref": "fine", "penal": 3.5, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "g2-polish" },
+      "feature_language": ["taper"],
+      "palette": { "render_hex": "#e9e2d0", "edge_hex": "#c9a978" },
+      "finish": "bare titanium / SLS nylon"
+    },
+    "soft-industrial": {
+      "label": "Soft Industrial",
+      "blurb": "Rams/Braun restraint — one radius, hidden fasteners.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.22, "mass": 0.14 },
+      "edge": { "fillet_policy": "uniform", "chamfer_policy": "edge-break", "edge_break_mm": 0.5, "corner_radius_mm": 4.0, "chamfer_mm": null },
+      "structural": { "volfrac": [0.45, 0.6], "quality_pref": "balanced", "penal": 3.0, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "smooth" },
+      "feature_language": [],
+      "palette": { "render_hex": "#e8e6e1", "edge_hex": "#9aa0a6" },
+      "finish": "matte off-white"
+    },
+    "cnc-billet": {
+      "label": "CNC Billet",
+      "blurb": "Carved from a solid block — pockets + countersinks.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.66, "mass": 0.36 },
+      "edge": { "fillet_policy": "tool-radius", "chamfer_policy": "top-edges", "edge_break_mm": 0, "corner_radius_mm": 1.5, "chamfer_mm": 1.0 },
+      "structural": { "volfrac": [0.5, 0.65], "quality_pref": "balanced", "penal": 3.0, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "as-is" },
+      "feature_language": ["pockets"],
+      "palette": { "render_hex": "#2b2f36", "edge_hex": "#ff8a5c" },
+      "finish": "bead-blast + anodize"
+    },
+    "faceted-crystalline": {
+      "label": "Faceted / Crystalline",
+      "blurb": "Gem-cut — chamfers not fillets, sharp arrises.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.95, "mass": 0.42 },
+      "edge": { "fillet_policy": "none", "chamfer_policy": "facet", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": 2.0 },
+      "structural": { "volfrac": [0.3, 0.4], "quality_pref": "balanced", "penal": 4.0, "symmetry": "axial", "z_bias": 1.0, "mesh_finish": "faceted" },
+      "feature_language": ["facets"],
+      "palette": { "render_hex": "#20242c", "edge_hex": "#7fd4ff" },
+      "finish": "gloss / vapor-polish"
+    },
+    "lattice-gyroid": {
+      "label": "Lattice / Gyroid",
+      "blurb": "Cellular, printed-light — solid skin + gyroid infill.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.38, "mass": 0.86 },
+      "edge": { "fillet_policy": "uniform", "chamfer_policy": "none", "edge_break_mm": 0.3, "corner_radius_mm": 2.0, "chamfer_mm": null },
+      "structural": { "volfrac": [0.2, 0.3], "quality_pref": "fine", "penal": 3.0, "symmetry": "none", "z_bias": 1.0, "mesh_finish": "smooth" },
+      "feature_language": ["lattice"],
+      "palette": { "render_hex": "#14201c", "edge_hex": "#57d38a" },
+      "finish": "translucent resin"
+    },
+    "maker-honest": {
+      "label": "Maker-Honest",
+      "blurb": "Designed for the nozzle — support-free, exposed ribs.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.50, "mass": 0.56 },
+      "edge": { "fillet_policy": "none", "chamfer_policy": "overhang-45", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": 0 },
+      "structural": { "volfrac": [0.2, 0.3], "quality_pref": "draft", "penal": 3.0, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "as-is" },
+      "feature_language": ["ribs"],
+      "palette": { "render_hex": "#1c2530", "edge_hex": "#4fc3f7" },
+      "finish": "layer-lines / PETG"
+    },
+    "retro-futurist": {
+      "label": "Retro-Futurist",
+      "blurb": "Pill forms, big soft radii, continuous surfaces.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.09, "mass": 0.20 },
+      "edge": { "fillet_policy": "g2", "chamfer_policy": "none", "edge_break_mm": 0, "corner_radius_mm": 10.0, "chamfer_mm": null },
+      "structural": { "volfrac": [0.5, 0.65], "quality_pref": "balanced", "penal": 3.0, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "g2-polish" },
+      "feature_language": ["taper"],
+      "palette": { "render_hex": "#f0e9dd", "edge_hex": "#cfd6dc" },
+      "finish": "gloss cream / chrome accent"
+    },
+    "neo-deco-fluted": {
+      "label": "Neo-Deco / Fluted",
+      "blurb": "Vertical reeding, columnar, stepped bases.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.56, "mass": 0.22 },
+      "edge": { "fillet_policy": "uniform", "chamfer_policy": "none", "edge_break_mm": 0.3, "corner_radius_mm": 1.5, "chamfer_mm": null },
+      "structural": { "volfrac": [0.45, 0.6], "quality_pref": "balanced", "penal": 3.0, "symmetry": "axial", "z_bias": 1.0, "mesh_finish": "as-is" },
+      "feature_language": ["flutes"],
+      "palette": { "render_hex": "#26221c", "edge_hex": "#d8b878" },
+      "finish": "fluted-glass / brushed metal"
+    },
+    "monolith-slab": {
+      "label": "Monolith / Slab",
+      "blurb": "Heavy, minimal, quiet mass — one tiny chamfer.",
+      "engine_affinity": "stack",
+      "axis": { "form": 0.82, "mass": 0.06 },
+      "edge": { "fillet_policy": "none", "chamfer_policy": "edge-break", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": 0.5 },
+      "structural": { "volfrac": [0.7, 0.9], "quality_pref": "draft", "penal": 3.0, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "as-is" },
+      "feature_language": [],
+      "palette": { "render_hex": "#2a2c2e", "edge_hex": "#6b7075" },
+      "finish": "stone-grey matte"
+    },
+    "aero-streamlined": {
+      "label": "Aero / Streamlined",
+      "blurb": "Teardrop, tapered, fluid — no abrupt steps.",
+      "engine_affinity": "either",
+      "axis": { "form": 0.20, "mass": 0.46 },
+      "edge": { "fillet_policy": "tangent-blend", "chamfer_policy": "none", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": null },
+      "structural": { "volfrac": [0.25, 0.4], "quality_pref": "fine", "penal": 3.0, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "smooth" },
+      "feature_language": ["taper"],
+      "palette": { "render_hex": "#171a1f", "edge_hex": "#4fc3f7" },
+      "finish": "automotive gloss / bare CF"
+    },
+    "gothic": {
+      "label": "Gothic",
+      "blurb": "Structural ornament — pointed arches, ribs, verticality.",
+      "engine_affinity": "structural",
+      "axis": { "form": 0.72, "mass": 0.70 },
+      "edge": { "fillet_policy": "none", "chamfer_policy": "fine-arris", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": 0.6 },
+      "structural": { "volfrac": [0.18, 0.3], "quality_pref": "fine", "penal": 3.5, "symmetry": "mirror-axial", "z_bias": 1.4, "mesh_finish": "faceted" },
+      "feature_language": ["ribs", "tracery", "taper"],
+      "palette": { "render_hex": "#1b1e26", "edge_hex": "#5a7a9a" },
+      "finish": "cast iron / dark stone"
+    },
+    "evolved-elegance": {
+      "label": "Evolved Elegance",
+      "blurb": "The refined biomimetic — few clean members, jewelry-grade.",
+      "engine_affinity": "structural",
+      "axis": { "form": 0.16, "mass": 0.74 },
+      "edge": { "fillet_policy": "g2", "chamfer_policy": "none", "edge_break_mm": 0, "corner_radius_mm": null, "chamfer_mm": null },
+      "structural": { "volfrac": [0.12, 0.2], "quality_pref": "fine", "penal": 3.5, "symmetry": "mirror", "z_bias": 1.0, "mesh_finish": "g2-polish" },
+      "feature_language": ["taper"],
+      "palette": { "render_hex": "#d8cdb8", "edge_hex": "#efe7d2" },
+      "finish": "satin anodized / pearl"
+    }
+  }
+}

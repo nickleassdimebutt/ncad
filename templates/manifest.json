@@ -1,0 +1,54 @@
+{
+  "plate_holes": {
+    "description": "Rectangular plate with optional corner fillets, an optional center bore, and one hole pattern (polar bolt-circle or rectangular grid).",
+    "bbox_map": { "x": "length", "y": "width", "z": "thickness" },
+    "params": {
+      "length":        { "default": 60,  "min": 5,   "max": 500 },
+      "width":         { "default": 40,  "min": 5,   "max": 500 },
+      "thickness":     { "default": 5,   "min": 0.8, "max": 60 },
+      "corner_fillet": { "default": 0,   "min": 0,   "max": 40 },
+      "edge_chamfer":  { "default": 0,   "min": 0,   "max": 20, "note": "top-edge chamfer (style edge language)" },
+      "pockets":       { "default": 0,   "min": 0,   "max": 1,  "note": "1 = rectangular lightening pockets (CNC billet feature)" },
+      "bore_d":        { "default": 0,   "min": 0,   "max": 200, "note": "0 disables the center bore" },
+      "hole_d":        { "default": 0,   "min": 0,   "max": 100, "note": "0 disables the hole pattern" },
+      "hole_n":        { "default": 4,   "min": 1,   "max": 64 },
+      "pattern":       { "default": 1,   "min": 0,   "max": 1, "note": "1 = polar bolt circle, 0 = grid row(s)" },
+      "circle_d":      { "default": 40,  "min": 2,   "max": 480, "note": "bolt circle diameter (polar)" },
+      "grid_dx":       { "default": 20,  "min": 1,   "max": 480 },
+      "grid_dy":       { "default": 20,  "min": 1,   "max": 480 },
+      "grid_nx":       { "default": 2,   "min": 1,   "max": 16 },
+      "grid_ny":       { "default": 2,   "min": 1,   "max": 16 }
+    }
+  },
+  "flange_disc": {
+    "description": "Circular flange: disc with center bore, polar bolt circle, optional raised hub boss around the bore.",
+    "bbox_map": { "x": "od", "y": "od", "z": "__total_height" },
+    "params": {
+      "od":         { "default": 80, "min": 10, "max": 500, "note": "outer diameter" },
+      "thickness":  { "default": 8,  "min": 1,  "max": 80 },
+      "edge_chamfer": { "default": 0, "min": 0, "max": 20, "note": "top-rim chamfer (style edge language)" },
+      "flutes":     { "default": 0, "min": 0, "max": 48, "note": "vertical rim reeding count (fluted column feature)" },
+      "bore_d":     { "default": 25, "min": 0,  "max": 400 },
+      "bolt_d":     { "default": 6,  "min": 0,  "max": 60, "note": "0 disables bolt holes" },
+      "bolt_n":     { "default": 4,  "min": 1,  "max": 64 },
+      "bcd":        { "default": 55, "min": 5,  "max": 480, "note": "bolt circle diameter" },
+      "hub_d":      { "default": 0,  "min": 0,  "max": 400, "note": "0 disables the hub boss" },
+      "hub_h":      { "default": 0,  "min": 0,  "max": 80 }
+    }
+  },
+  "box_enclosure": {
+    "description": "Open-top hollow enclosure shell: outer box, uniform walls and floor, optional outer corner fillets and floor holes.",
+    "bbox_map": { "x": "outer_x", "y": "outer_y", "z": "outer_z" },
+    "params": {
+      "outer_x":       { "default": 100, "min": 10,  "max": 600 },
+      "outer_y":       { "default": 60,  "min": 10,  "max": 600 },
+      "outer_z":       { "default": 30,  "min": 5,   "max": 300 },
+      "wall":          { "default": 2.5, "min": 0.8, "max": 20 },
+      "floor":         { "default": 2.5, "min": 0.8, "max": 20 },
+      "corner_fillet": { "default": 3,   "min": 0,   "max": 30 },
+      "hole_d":        { "default": 0,   "min": 0,   "max": 100, "note": "0 disables floor holes" },
+      "hole_n":        { "default": 4,   "min": 1,   "max": 64 },
+      "circle_d":      { "default": 40,  "min": 2,   "max": 580, "note": "bolt circle for floor holes" }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# solver + engine venv (recreate: uv venv + numpy/scipy/scikit-image/matplotlib/scikit-sparse)
+.venv/
+
+# python bytecode
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# pre-rewrite UI backups
+*.bak-*
+
+# per-run scratch (jobs live in ~/Documents/CAD/<project>/, outside this repo)
+topo-config.json
