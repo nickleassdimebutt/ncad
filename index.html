@@ -63,6 +63,21 @@
   .node .dot{width:7px;height:7px;border-radius:50%;flex:none}
   .node .meta{font-family:var(--mono);font-size:9.5px;color:var(--faint);flex:none}
   .node .meta.best{color:var(--ok)}
+  .node .trash{flex:none;border:0;background:none;color:var(--faint);font-size:11px;padding:0 2px;
+               cursor:pointer;display:none;line-height:1}
+  .node:hover .trash{display:block}
+  .node .trash:hover{color:var(--bad)}
+  .node .trash.arm{display:block;color:var(--bad);font-family:var(--mono);font-size:9.5px}
+  .tidy{margin:2px 10px 0;padding:5px 9px;border:0;background:none;color:var(--faint);
+        font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;cursor:pointer;text-align:left;flex:none}
+  .tidy:hover{color:var(--dim)}
+  .tidypanel{margin:0 10px 6px;padding:8px 10px;border:1px dashed var(--line2);border-radius:8px;
+             font-size:11.5px;color:var(--dim);flex:none}
+  .tidypanel button{display:block;width:100%;text-align:left;border:0;background:none;color:var(--cool);
+                    font-family:var(--mono);font-size:11px;padding:4px 0;cursor:pointer}
+  .tidypanel button:hover{color:var(--ink)}
+  .tidypanel button:disabled{color:var(--faint);cursor:default}
+  .tidypanel .thint{font-size:10px;color:var(--faint);padding-top:4px}
   .child{margin-left:16px;position:relative;font-size:12.5px}
   .child::before{content:"";position:absolute;left:-9px;top:-4px;height:calc(50% + 4px);
                  width:8px;border-left:1px solid var(--line2);border-bottom:1px solid var(--line2)}
@@ -284,6 +299,8 @@
     <aside class="rail">
       <div class="railhead">Projects</div>
       <div id="tree"></div>
+      <button class="tidy" id="tidybtn">🧹 tidy up…</button>
+      <div class="tidypanel" id="tidypanel" style="display:none"></div>
       <button class="newbtn" id="newbtn">+ New part</button>
       <button class="newbtn" id="uplbtn" style="margin-top:0">⤒ Upload part → redesign</button>
       <input type="file" id="uplfile" accept=".stl,.step,.stp" style="display:none">
@@ -407,6 +424,7 @@ function renderChrome(){
     for(const j of wsJobs) tray.appendChild(nodeEl(j,false));
     tree.appendChild(tray);
   }
+  renderTidy();                                   // keep open tidy-panel counts live
 }
 function dotClass(state){
   if(state==="workspace") return "d-ws";
@@ -436,8 +454,68 @@ function nodeEl(j, child, parent, best){
   n.innerHTML = '<span class="dot '+dotClass(j.state)+'"></span>'+
     '<span class="nm">'+esc(label)+'</span><span class="meta'+(best?" best":"")+'">'+esc(meta)+'</span>';
   n.onclick = ()=>selectJob(j.id);
+  // hover 🗑 → armed "sure?" → moves the project dir to the macOS Trash (reversible).
+  if(j.state!=="workspace" && !ACTIVE.has(j.state)){
+    const t=document.createElement("button"); t.className="trash"; t.textContent="🗑"; t.title="move to Trash";
+    t.onclick=(e)=>{ e.stopPropagation();
+      if(!t.dataset.arm){ t.dataset.arm="1"; t.classList.add("arm"); t.textContent="sure?";
+        t._t=setTimeout(()=>{ delete t.dataset.arm; t.classList.remove("arm"); t.textContent="🗑"; },3000);
+        return; }
+      clearTimeout(t._t); deleteJob(j); };
+    n.appendChild(t);
+  }
   return n;
 }
+async function deleteJob(j){
+  try{
+    const r=await fetch("/api/jobs/"+j.id+"/delete",{method:"POST"});
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||"delete failed");
+  }catch(e){ alert("Couldn't delete "+j.name+": "+e.message); return; }
+  S.jobs=S.jobs.filter(x=>x.id!==j.id);
+  if(S.sel===j.id){ S.sel=null; renderMain(true); }
+  renderChrome();
+}
+/* 🧹 tidy: bulk cleanup of the project pile. Everything goes to the macOS Trash
+   (reversible) — the permanent step (emptying the Trash) stays the user's. */
+function tidyCandidates(){
+  const real=S.jobs.filter(j=>j.state!=="workspace");
+  const wrecks=real.filter(j=>["failed","error","canceled"].includes(j.state));
+  const fams={}; for(const j of real){ (fams[j.root||baseName(j.name)] ||= []).push(j); }
+  const superseded=[];
+  for(const key of Object.keys(fams)){
+    const done=fams[key].filter(j=>j.state==="done");
+    if(done.length<2) continue;
+    const newest=done.reduce((a,b)=>(b.created||0)>(a.created||0)?b:a);
+    let best=null,bc=Infinity;
+    for(const j of done){ const c=finalCompliance(j); if(c!=null&&c<bc){ bc=c; best=j; } }
+    for(const j of done) if(j!==newest && j!==best && j.id!==S.sel) superseded.push(j);
+  }
+  return {wrecks, superseded};
+}
+async function tidyRun(list,btn){
+  let n=0;
+  for(const j of list){
+    btn.disabled=true; btn.textContent="… "+(++n)+"/"+list.length+"  "+j.name;
+    try{ const r=await fetch("/api/jobs/"+j.id+"/delete",{method:"POST"});
+      if(r.ok){ S.jobs=S.jobs.filter(x=>x.id!==j.id); if(S.sel===j.id) S.sel=null; }
+    }catch(e){ /* skip; it stays in the list */ }
+  }
+  renderMain(true); renderChrome(); renderTidy();
+}
+function renderTidy(){
+  const p=$("#tidypanel"); if(!p||p.style.display==="none") return;
+  const {wrecks,superseded}=tidyCandidates();
+  p.innerHTML=
+    '<button id="tidyFail"'+(wrecks.length?"":" disabled")+'>✕ failed / canceled — '+wrecks.length+' job'+(wrecks.length===1?"":"s")+'</button>'+
+    '<button id="tidyOld"'+(superseded.length?"":" disabled")+'>⌛ superseded revisions — '+superseded.length+' (keeps best + latest)</button>'+
+    '<div class="thint">moves project folders to the macOS Trash — undo by dragging them back.</div>';
+  const bf=$("#tidyFail"); if(bf&&wrecks.length) bf.onclick=()=>tidyRun(tidyCandidates().wrecks,bf);
+  const bo=$("#tidyOld"); if(bo&&superseded.length) bo.onclick=()=>tidyRun(tidyCandidates().superseded,bo);
+}
+$("#tidybtn").onclick=()=>{ const p=$("#tidypanel");
+  const open=p.style.display!=="none";
+  p.style.display=open?"none":""; $("#tidybtn").textContent=open?"🧹 tidy up…":"🧹 tidy up ▴";
+  renderTidy(); };
 function expandEl(base, total, collapse){
   const e = el("div","expand", collapse?"▲ collapse":("+"+(total-1)+" revisions ▾"));
   e.onclick = ()=>{ S.expanded[base]=!S.expanded[base]; renderChrome(); };
@@ -746,6 +824,8 @@ function mountJob(j){
         '<button type="button" data-tool="solid">🧱 solid</button>'+
         '<button type="button" data-tool="preserve">📐 preserve</button>'+
         '<button type="button" data-tool="void">⬛ clear</button>'+
+        '<button type="button" data-act="undo" title="undo last pick">↩</button>'+
+        '<button type="button" data-act="clearpicks" title="remove every picked region">✕ all</button>'+
       '</div>'+
       '<div class="glhint">drag&nbsp;orbit&nbsp;·&nbsp;scroll&nbsp;zoom&nbsp;·&nbsp;shift-drag&nbsp;pan</div>'+
       '<svg id="jCallouts" class="callouts" style="display:none"></svg>'+
@@ -769,21 +849,38 @@ function mountJob(j){
   // 3D click-to-pick: a toolbar tool + a click on a face adds a keep-region to the recipe
   S.pickTool=null; GLV.setTool(null);                    // sync GLV's tool with the reset toolbar
   const pt=$("#jPickTools");
-  if(pt) pt.querySelectorAll("button").forEach(b=>b.onclick=()=>{
-    S.pickTool=b.dataset.tool||null;
-    pt.querySelectorAll("button").forEach(x=>x.className=(x===b?"on":""));
-    GLV.setTool(S.pickTool);
-  });
+  const flash=(msg)=>{ const h=$(".viewport .glhint"); if(!h) return;
+    if(h.dataset.base==null) h.dataset.base=h.textContent;
+    h.textContent=msg; clearTimeout(h._t); h._t=setTimeout(()=>{ h.textContent=h.dataset.base; },2600); };
+  const pickTool=(t)=>{ S.pickTool=t||null; GLV.setTool(S.pickTool);
+    if(pt) pt.querySelectorAll("button[data-tool]").forEach(x=>x.className=((x.dataset.tool||null)===S.pickTool?"on":"")); };
+  if(pt){
+    pt.querySelectorAll("button[data-tool]").forEach(b=>b.onclick=()=>pickTool(b.dataset.tool||null));
+    // mistakes happen: ↩ undoes the last pick, ✕ all wipes every region
+    pt.querySelector('[data-act="undo"]').onclick=()=>{ syncRegionsFromDOM();
+      const r=(S.editRegions||[]).pop();
+      renderRegions(); GLV.setHighlight(S.editRegions);
+      flash(r?("↩ removed "+r.rule+(r.tris?" face":" region")):"nothing to undo"); };
+    pt.querySelector('[data-act="clearpicks"]').onclick=()=>{ const n=(S.editRegions||[]).length;
+      S.editRegions=[]; renderRegions(); GLV.setHighlight([]);
+      flash(n?("✕ cleared "+n+" region"+(n===1?"":"s")):"no regions set"); };
+  }
   GLV.onPick((rule,pick)=>{                               // a face was clicked with a tool active
     syncRegionsFromDOM();
-    const reg={box:pick.box, rule}; if(pick.tris) reg.tris=pick.tris;
-    (S.editRegions=S.editRegions||[]).push(reg);
+    S.editRegions=S.editRegions||[];
+    // clicking an already-picked face unpicks it (same rule) or just swaps its rule
+    const same=(a,b)=>a&&b&&a.length===6&&b.length===6&&a.every((v,i)=>Math.abs(v-b[i])<0.015);
+    const i=S.editRegions.findIndex(r=>r.tris&&same(r.box,pick.box));
+    if(i>=0){
+      if(S.editRegions[i].rule===rule){ S.editRegions.splice(i,1); flash("− unpicked face (click again to re-add)"); }
+      else { S.editRegions[i].rule=rule; flash("↷ face is now "+rule); }
+    } else {
+      const reg={box:pick.box, rule}; if(pick.tris) reg.tris=pick.tris;
+      S.editRegions.push(reg);
+      flash(pick.tris ? ("＋ "+rule+" · "+pick.ntri+"-triangle face — Run revision to apply")
+                      : ("＋ "+rule+" on "+pick.face+" face — Run revision to apply"));
+    }
     renderRegions(); GLV.setHighlight(S.editRegions);
-    const h=$(".viewport .glhint");
-    if(h){ if(h.dataset.base==null) h.dataset.base=h.textContent;
-      h.textContent = pick.tris ? ("＋ "+rule+" · "+pick.ntri+"-triangle face — Run revision to apply")
-                                 : ("＋ "+rule+" on "+pick.face+" face — Run revision to apply");
-      clearTimeout(h._t); h._t=setTimeout(()=>{ h.textContent=h.dataset.base; },2600); }
   });
 }
 /* cross-fade the viewport to a new frame url (fixed camera ⇒ registers in place) */
@@ -1083,6 +1180,12 @@ function stopPlay(){ if(S.play){ clearInterval(S.play); S.play=null; const b=$("
 document.addEventListener("keydown",e=>{
   if(S.mode!=="job") return;
   if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||"")) return;
+  if(e.key==="Escape" && S.pickTool){                    // drop the pick tool → back to rotate
+    S.pickTool=null; GLV.setTool(null);
+    const pt=$("#jPickTools");
+    if(pt) pt.querySelectorAll("button[data-tool]").forEach(x=>x.className=(x.dataset.tool===""?"on":""));
+    return;
+  }
   if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return;
   const j=selected(); if(!j) return; const its=iterList(j); if(its.length<2) return;
   e.preventDefault(); stopPlay();

@@ -17,6 +17,7 @@ import copy
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import threading
@@ -1979,6 +1980,29 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 return self._send(400, {"error": str(exc)})
 
+        m = re.match(r"^/api/jobs/([0-9a-f]+)/delete$", self.path)
+        if m:
+            job = JOBS.get(m.group(1))
+            if not job:
+                return self._send(404, {"error": "no such job"})
+            with LOCK:
+                if job["state"] in ("configuring", "generating", "building", "verifying", "optimizing"):
+                    return self._send(409, {"error": "job is running — cancel it first"})
+                if job["id"] in JOB_ORDER:
+                    JOB_ORDER.remove(job["id"])
+                del JOBS[job["id"]]
+            # reversible: the project dir goes to the macOS Trash, never hard-deleted
+            pdir = (CAD_ROOT / job["name"]).resolve()
+            trashed = None
+            if (pdir.is_dir() and pdir != CAD_ROOT and pdir.parent == CAD_ROOT
+                    and pdir.name not in ("genloop", ".venv")):
+                dest = Path.home() / ".Trash" / f"ncad-{job['name']}-{job['id']}"
+                try:
+                    shutil.move(str(pdir), str(dest))
+                    trashed = str(dest)
+                except OSError as exc:
+                    return self._send(500, {"error": f"could not move to Trash: {exc}"})
+            return self._send(200, {"deleted": job["id"], "trashed": trashed})
         m = re.match(r"^/api/jobs/([0-9a-f]+)/cancel$", self.path)
         if m:
             job = JOBS.get(m.group(1))
