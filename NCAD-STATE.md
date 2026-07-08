@@ -259,8 +259,11 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
 - **Cleanup:** trashed the demo/test jobs to ~/.Trash (upl-*, t-ok, smoke-frame, bones-demo-r6/r7),
   killed a 37h-wedged agentcad process.
 - **Mesh detail (sub-voxel smoothing):** the plain-solid final mesh (and the live previews) now
-  march the CONTINUOUS filtered density UPSAMPLED `mesh_detail`× (trilinear), NOT the binary x≥0.5
-  staircase — recovering the sub-voxel gradient the density filter computed. Surface smoothness is
+  march the CONTINUOUS filtered density UPSAMPLED `mesh_detail`× (trilinear + a light Gaussian
+  σ≈0.7 coarse-voxel), NOT the binary x≥0.5 staircase — recovering the sub-voxel gradient the
+  density filter computed. The Gaussian removes grid-aligned RIBBING (trilinear zoom is only C0
+  across coarse cells → marching-cubes creases; the box sensitivity filter adds grid stepping) —
+  confirmed via an A/B render (concentric grid bands → clean), structure/compliance unchanged. Surface smoothness is
   DECOUPLED from the coarse solve grid (a fine mesh from a coarse solve; structure unchanged, only
   the surface). Restricted to the kept component (dilated 1 for the boundary layer), memory-capped
   (~15M voxels), faceted styles stay 1× (crystalline look). `mesh_detail` 1/2/3 = coarse/smooth/fine

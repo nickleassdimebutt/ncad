@@ -302,7 +302,9 @@ def density_mesh(x, dims, detail=1):
     iso = min(iso, float(x.max()) - 1e-4)
     if iso <= 1e-4:
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
-    field = ndimage.zoom(x, detail, order=1) if detail > 1 else x
+    field = x
+    if detail > 1:                                    # upsample + de-rib (see final-mesh note)
+        field = ndimage.gaussian_filter(ndimage.zoom(x, detail, order=1), sigma=0.7 * detail)
     fnx, fny, fnz = field.shape
     hx, hy, hz = Lx / fnx, Ly / fny, Lz / fnz
     pad = np.pad(field, 1)
@@ -737,6 +739,10 @@ def main():
             d -= 1
         if d > 1:
             field = ndimage.zoom(field, d, order=1)
+            # trilinear zoom is only C0 across the coarse cells → marching-cubes leaves faint
+            # grid-aligned ribbing; a light Gaussian (~0.7 coarse voxel) removes it without
+            # blurring the structure. This also softens the box sensitivity filter's stepping.
+            field = ndimage.gaussian_filter(field, sigma=0.7 * d)
         sx, sy, sz = Lx / field.shape[0], Ly / field.shape[1], Lz / field.shape[2]
         pad = np.pad(field.astype(np.float32), 1)
         verts, faces, _, _ = measure.marching_cubes(pad, 0.5, spacing=(sx, sy, sz))
