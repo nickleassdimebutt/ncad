@@ -776,12 +776,14 @@ function mountJob(j){
   });
   GLV.onPick((rule,pick)=>{                               // a face was clicked with a tool active
     syncRegionsFromDOM();
-    (S.editRegions=S.editRegions||[]).push({box:pick.box, rule});
-    renderRegions();
+    const reg={box:pick.box, rule}; if(pick.tris) reg.tris=pick.tris;
+    (S.editRegions=S.editRegions||[]).push(reg);
+    renderRegions(); GLV.setHighlight(S.editRegions);
     const h=$(".viewport .glhint");
     if(h){ if(h.dataset.base==null) h.dataset.base=h.textContent;
-      h.textContent="＋ "+rule+" on "+pick.face+" face — Run revision to apply";
-      clearTimeout(h._t); h._t=setTimeout(()=>{ h.textContent=h.dataset.base; },2400); }
+      h.textContent = pick.tris ? ("＋ "+rule+" · "+pick.ntri+"-triangle face — Run revision to apply")
+                                 : ("＋ "+rule+" on "+pick.face+" face — Run revision to apply");
+      clearTimeout(h._t); h._t=setTimeout(()=>{ h.textContent=h.dataset.base; },2600); }
   });
 }
 /* cross-fade the viewport to a new frame url (fixed camera ⇒ registers in place) */
@@ -855,6 +857,7 @@ function updateJob(j){
     if(GLV.mount($("#jGL"))){
       const st3=styleOf(j), hex3=(st3&&st3.palette&&st3.palette.render_hex)||"#7ba7c9";
       GLV.show(stlUrl, hex3);
+      GLV.setHighlight(S.editRegions||[]);               // show existing keep-regions on the model
     } else { S.gl3d=false; if(b3d) b3d.textContent="◲ rotate"; }  // no WebGL → fall back to PNG
   } else GLV.hide();
   if(vp) vp.classList.toggle("gl-on", S.gl3d && can3d);
@@ -1111,10 +1114,14 @@ const GLV = (function(){
   let drag=null, mounted=false;
   let geomV=null, bmin=[0,0,0], bdim=[1,1,1];             // CPU geometry + bbox for click-picking
   let tool=null, onPickCb=null, lastMVP=null;             // click-to-pick state
+  let hbo=null, hRanges=[], hCount=0, hiRegions=null;     // keep-region highlight overlay
+  let triV=null, nbr=null, adjUrl=null;                   // per-face flood connectivity (cached per mesh)
   const VS='attribute vec3 aPos;attribute vec3 aNorm;uniform mat4 uMVP;'+
     'varying vec3 vN;varying vec3 vW;void main(){vN=aNorm;vW=aPos;gl_Position=uMVP*vec4(aPos,1.0);}';
   const FS='precision mediump float;varying vec3 vN;varying vec3 vW;uniform vec3 uCam;uniform vec3 uColor;'+
-    'void main(){vec3 N=normalize(vN);vec3 V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;'+
+    'uniform float uFlat;uniform float uAlpha;'+
+    'void main(){if(uFlat>0.5){gl_FragColor=vec4(uColor,uAlpha);return;}'+     // flat keep-region overlay
+    'vec3 N=normalize(vN);vec3 V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;'+
     'float key=max(dot(N,V),0.0);'+                                       // camera headlight
     'float fill=max(dot(N,normalize(vec3(-0.45,0.35,0.82))),0.0)*0.35;'+  // fixed upper fill
     'float lit=0.34+0.66*key+fill;'+                                       // ambient + key + fill
@@ -1161,14 +1168,44 @@ const GLV = (function(){
     return [(m[0]*v[0]+m[4]*v[1]+m[8]*v[2]+m[12])/w,(m[1]*v[0]+m[5]*v[1]+m[9]*v[2]+m[13])/w,(m[2]*v[0]+m[6]*v[1]+m[10]*v[2]+m[14])/w];}
   const FACE_BOX={left:[0,0,0,0.06,1,1],right:[0.94,0,0,1,1,1],front:[0,0,0,1,0.06,1],
     back:[0,0.94,0,1,1,1],bottom:[0,0,0,1,1,0.06],top:[0,0,0.94,1,1,1]};
-  function pickAt(cx,cy){                                // canvas-relative CSS px → {face,box} or null
+  const ADJ_CAP=1200000;                                // above this, skip flood → whole-side box
+                                                        // (fine mesh_detail=3 results run ~0.5M tris)
+  function buildAdj(){                                  // shared-edge triangle connectivity (cached per mesh)
+    if(adjUrl===url0) return triV!=="skip";
+    adjUrl=url0; triV=null; nbr=null;
+    if(!geomV||!nTris||nTris>ADJ_CAP){ triV="skip"; return false; }
+    const q=(Math.max(bdim[0],bdim[1],bdim[2])*2e-5)||1e-6;   // weld tolerance → recover shared verts
+    const vids=new Map(); let next=0; triV=new Int32Array(nTris*3);
+    for(let i=0;i<nTris;i++){ const b=i*18;
+      for(let k=0;k<3;k++){ const o=b+k*6;
+        const kk=Math.round(geomV[o]/q)+"_"+Math.round(geomV[o+1]/q)+"_"+Math.round(geomV[o+2]/q);
+        let id=vids.get(kk); if(id===undefined){ id=next++; vids.set(kk,id); } triV[i*3+k]=id; } }
+    nbr=new Array(nTris); for(let i=0;i<nTris;i++) nbr[i]=[];
+    const em=new Map();                                 // first tri seen on an edge; links the pair
+    const edge=(a,b,i)=>{ const ek=a<b?a*next+b:b*next+a; const j=em.get(ek);
+      if(j===undefined) em.set(ek,i); else { nbr[i].push(j); nbr[j].push(i); } };
+    for(let i=0;i<nTris;i++){ const a=triV[i*3],b=triV[i*3+1],c=triV[i*3+2]; edge(a,b,i); edge(b,c,i); edge(c,a,i); }
+    return true;
+  }
+  function floodFace(seed,sn){                          // coplanar-connected patch from a seed triangle
+    if(!buildAdj()) return null;
+    const COS=0.978;                                    // ~12° tolerance (flat faces read cleanly)
+    const seen=new Uint8Array(nTris), stack=[seed], out=[seed]; seen[seed]=1;
+    while(stack.length){ const t=stack.pop(), a=nbr[t];
+      for(let x=0;x<a.length;x++){ const j=a[x]; if(seen[j]) continue; const b=j*18;
+        if(geomV[b+3]*sn[0]+geomV[b+4]*sn[1]+geomV[b+5]*sn[2]>=COS){ seen[j]=1; out.push(j); stack.push(j); } }
+      if(out.length>=20000) break;                      // pathological runaway guard
+    }
+    return out;
+  }
+  function pickAt(cx,cy){                                // canvas px → face patch {face,box,tris} or whole-side {face,box}
     if(!lastMVP||!geomV||!nTris) return null;
     const inv=invMat(lastMVP); if(!inv) return null;
     const dpr=Math.min(window.devicePixelRatio||1,2);
     const nx=2*(cx*dpr)/cv.width-1, ny=1-2*(cy*dpr)/cv.height;
     const o=mulV(inv,[nx,ny,-1]), fp=mulV(inv,[nx,ny,1]);
     let d=[fp[0]-o[0],fp[1]-o[1],fp[2]-o[2]]; const dl=Math.hypot(d[0],d[1],d[2])||1; d=[d[0]/dl,d[1]/dl,d[2]/dl];
-    let best=Infinity, hit=null;                          // Möller–Trumbore over the triangles
+    let best=Infinity, hit=null, hidx=-1;                 // Möller–Trumbore over the triangles
     for(let i=0;i<nTris;i++){ const b=i*18;
       const ax=geomV[b],ay=geomV[b+1],az2=geomV[b+2];
       const e1x=geomV[b+6]-ax,e1y=geomV[b+7]-ay,e1z=geomV[b+8]-az2, e2x=geomV[b+12]-ax,e2y=geomV[b+13]-ay,e2z=geomV[b+14]-az2;
@@ -1179,13 +1216,30 @@ const GLV = (function(){
       const qx=ty*e1z-tz*e1y, qy=tz*e1x-tx*e1z, qz=tx*e1y-ty*e1x;
       const v=(d[0]*qx+d[1]*qy+d[2]*qz)*iv; if(v<0||u+v>1) continue;
       const t=(e2x*qx+e2y*qy+e2z*qz)*iv;
-      if(t>1e-6&&t<best){ best=t; hit=[o[0]+d[0]*t,o[1]+d[1]*t,o[2]+d[2]*t]; }
+      if(t>1e-6&&t<best){ best=t; hit=[o[0]+d[0]*t,o[1]+d[1]*t,o[2]+d[2]*t]; hidx=i; }
     }
     if(!hit) return null;
-    const n=[(hit[0]-bmin[0])/bdim[0],(hit[1]-bmin[1])/bdim[1],(hit[2]-bmin[2])/bdim[2]];
-    const cand=[['left',n[0]],['right',1-n[0]],['front',n[1]],['back',1-n[1]],['bottom',n[2]],['top',1-n[2]]];
-    cand.sort((a,b)=>a[1]-b[1]);
-    return {face:cand[0][0], box:FACE_BOX[cand[0][0]].slice()};
+    const nz01=[(hit[0]-bmin[0])/bdim[0],(hit[1]-bmin[1])/bdim[1],(hit[2]-bmin[2])/bdim[2]];
+    const cand=[['left',nz01[0]],['right',1-nz01[0]],['front',nz01[1]],['back',1-nz01[1]],['bottom',nz01[2]],['top',1-nz01[2]]];
+    cand.sort((a,b)=>a[1]-b[1]); const face=cand[0][0];
+    const sn=[geomV[hidx*18+3],geomV[hidx*18+4],geomV[hidx*18+5]];   // seed face normal
+    const patch=floodFace(hidx,sn);
+    if(patch&&patch.length){                              // per-face patch → exact surface footprint
+      const tris=[]; const bb=[1,1,1,0,0,0];
+      for(let p=0;p<patch.length;p++){ const b=patch[p]*18; const row=[];
+        for(let k=0;k<3;k++){ const off=b+k*6;
+          const cu=Math.min(1,Math.max(0,(geomV[off]-bmin[0])/bdim[0]));
+          const cv2=Math.min(1,Math.max(0,(geomV[off+1]-bmin[1])/bdim[1]));
+          const cw=Math.min(1,Math.max(0,(geomV[off+2]-bmin[2])/bdim[2]));
+          row.push(cu,cv2,cw);
+          if(cu<bb[0])bb[0]=cu; if(cv2<bb[1])bb[1]=cv2; if(cw<bb[2])bb[2]=cw;
+          if(cu>bb[3])bb[3]=cu; if(cv2>bb[4])bb[4]=cv2; if(cw>bb[5])bb[5]=cw; }
+        tris.push(row); }
+      for(let a=0;a<3;a++){ if(bb[a+3]-bb[a]<0.02){ const m=(bb[a]+bb[a+3])/2;   // give a flat face a valid aabb
+        bb[a]=Math.max(0,m-0.02); bb[a+3]=Math.min(1,m+0.02); } }
+      return {face, box:bb, tris, ntri:patch.length};
+    }
+    return {face, box:FACE_BOX[face].slice()};            // fallback: whole-side slab (huge mesh)
   }
 
   function compile(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
@@ -1203,6 +1257,7 @@ const GLV = (function(){
     if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ gl=null; return false; }
     A.pos=gl.getAttribLocation(prog,"aPos"); A.norm=gl.getAttribLocation(prog,"aNorm");
     U.mvp=gl.getUniformLocation(prog,"uMVP"); U.cam=gl.getUniformLocation(prog,"uCam"); U.color=gl.getUniformLocation(prog,"uColor");
+    U.flat=gl.getUniformLocation(prog,"uFlat"); U.alpha=gl.getUniformLocation(prog,"uAlpha");
     vbo=gl.createBuffer(); gl.enable(gl.DEPTH_TEST); gl.clearColor(0.031,0.043,0.059,1);
     }catch(e){ gl=null; mounted=false; return false; }
     // interaction (pointer events; render-on-demand)
@@ -1256,6 +1311,7 @@ const GLV = (function(){
         bmin=[g.bb[0],g.bb[1],g.bb[2]]; bdim=[g.bb[3]-g.bb[0]||1,g.bb[4]-g.bb[1]||1,g.bb[5]-g.bb[2]||1];
         radius=0.5*Math.hypot(g.bb[3]-g.bb[0],g.bb[4]-g.bb[1],g.bb[5]-g.bb[2])||1;
         tgt=center.slice(); dist=radius*2.6; az=-2.15; el=0.5;
+        buildHi();                                         // re-project cached regions onto the new mesh's bbox
       }catch(e){ if(url0===myUrl) nTris=0; }
     }
     resize();
@@ -1277,20 +1333,48 @@ const GLV = (function(){
     gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos,3,gl.FLOAT,false,24,0);
     gl.enableVertexAttribArray(A.norm); gl.vertexAttribPointer(A.norm,3,gl.FLOAT,false,24,12);
     gl.uniformMatrix4fv(U.mvp,false,new Float32Array(mvp));
-    gl.uniform3fv(U.cam,new Float32Array(e)); gl.uniform3fv(U.color,new Float32Array(color));
+    gl.uniform3fv(U.cam,new Float32Array(e)); gl.uniform1f(U.flat,0); gl.uniform1f(U.alpha,1);
+    gl.uniform3fv(U.color,new Float32Array(color));
     gl.drawArrays(gl.TRIANGLES,0,nTris*3);
+    if(hCount&&hRanges.length){                           // keep-region overlay: flat, blended, offset
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+      gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(-1,-1);
+      gl.bindBuffer(gl.ARRAY_BUFFER,hbo);
+      gl.vertexAttribPointer(A.pos,3,gl.FLOAT,false,24,0); gl.vertexAttribPointer(A.norm,3,gl.FLOAT,false,24,12);
+      gl.uniform1f(U.flat,1); gl.uniform1f(U.alpha,0.5);
+      for(let i=0;i<hRanges.length;i++){ const rg=hRanges[i];
+        gl.uniform3fv(U.color,new Float32Array(rg.color)); gl.drawArrays(gl.TRIANGLES,rg.start*3,rg.count*3); }
+      gl.uniform1f(U.flat,0); gl.uniform1f(U.alpha,1);
+      gl.disable(gl.POLYGON_OFFSET_FILL); gl.depthMask(true); gl.disable(gl.BLEND);
+    }
   }
+  const HI_COLOR={solid:[1,.55,.15],preserve:[.3,.7,1],void:[1,.28,.28]};
+  function buildHi(){                                     // normalized region tris → world overlay buffer
+    hRanges=[]; hCount=0;
+    if(!gl||!nTris){ return; }
+    if(!hbo) hbo=gl.createBuffer();
+    const arr=[];
+    (hiRegions||[]).forEach(r=>{ if(!r||!r.tris||!r.tris.length) return;
+      const start=hCount;
+      r.tris.forEach(t=>{ for(let k=0;k<3;k++){
+        arr.push(bmin[0]+t[k*3]*bdim[0], bmin[1]+t[k*3+1]*bdim[1], bmin[2]+t[k*3+2]*bdim[2], 0,0,0); } });
+      hCount+=r.tris.length; hRanges.push({start, count:r.tris.length, color:HI_COLOR[r.rule]||HI_COLOR.solid});
+    });
+    gl.bindBuffer(gl.ARRAY_BUFFER,hbo); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(arr),gl.DYNAMIC_DRAW);
+  }
+  function setHighlight(regions){ hiRegions=regions||[]; buildHi(); render(); }
   function hide(){                                        // only abandon a DETACHED canvas (job
     if(gl && cv && !cv.isConnected){                       // switch); a same-job toggle keeps its
       const ex=gl.getExtension("WEBGL_lose_context"); if(ex) ex.loseContext();  // live context so
       gl=null; cv=null; mounted=false; url0=null; nTris=0;                      // re-open reuses it
+      hbo=null; hRanges=[]; hCount=0;
     }
   }
   function hexRGB(h){ h=(h||"").replace("#",""); if(h.length!==6) return [.48,.65,.79];
     return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255]; }
   function setTool(t){ tool=t||null; if(cv) cv.style.cursor = tool?"crosshair":"grab"; }
   function onPick(cb){ onPickCb=cb; }
-  return { mount, show, resize, hide, setTool, onPick };
+  return { mount, show, resize, hide, setTool, onPick, setHighlight };
 })();
 
 /* ---------- DOCK: recipe + metrics + log ---------- */
@@ -1383,12 +1467,15 @@ function renderRegions(){
   const regs=S.editRegions||[];
   box.innerHTML = regs.length ? regs.map((r,i)=>{
     const opts=REGION_RULES.map(([v,lab])=>'<option value="'+v+'"'+(r.rule===v?" selected":"")+'>'+lab+'</option>').join("");
-    return '<div class="sen"><select data-r="regrule-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select> '+
-      regionSentence(r.box)+'<button type="button" class="regx" data-rmreg="'+i+'" title="remove">✕</button></div>'+
-      facePicker("reg",i,r.box)+box6("reg",i,r.box);
+    const sel='<select data-r="regrule-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select> ';
+    const rm='<button type="button" class="regx" data-rmreg="'+i+'" title="remove">✕</button>';
+    if(r.tris&&r.tris.length)                             // per-face patch: precise, not box-editable
+      return '<div class="sen">'+sel+'🔺 picked face · '+r.tris.length+' tris'+rm+'</div>';
+    return '<div class="sen">'+sel+regionSentence(r.box)+rm+'</div>'+facePicker("reg",i,r.box)+box6("reg",i,r.box);
   }).join("") : '<div class="hint" style="padding:2px 0 0">none — the whole body optimizes freely.</div>';
   box.querySelectorAll("[data-rmreg]").forEach(b=>b.onclick=()=>{
-    syncRegionsFromDOM(); S.editRegions.splice(+b.dataset.rmreg,1); renderRegions(); wireFaces(); });
+    syncRegionsFromDOM(); S.editRegions.splice(+b.dataset.rmreg,1); renderRegions(); wireFaces();
+    if(S.gl3d) GLV.setHighlight(S.editRegions); });
   wireFaces();
 }
 /* progressive disclosure: plain-language labels + primary/fine grouping for parametric */
@@ -1442,8 +1529,9 @@ function renderRecipe(j){
   $("#dRev").onclick=runRevision;
   wireFaces();
   if(cfg.engine==="structural"){                         // Phase 2 keep-regions live list
-    S.editRegions=(cfg.regions||[]).map(r=>({box:r.box.slice(),rule:r.rule}));
-    renderRegions();
+    S.editRegions=(cfg.regions||[]).map(r=>{ const o={box:(r.box||[0.94,0,0,1,1,1]).slice(),rule:r.rule};
+      if(r.tris&&r.tris.length) o.tris=r.tris.map(t=>t.slice()); return o; });
+    renderRegions(); if(S.gl3d) GLV.setHighlight(S.editRegions);
     const ar=$("#rAddReg"); if(ar) ar.onclick=()=>{ syncRegionsFromDOM();
       S.editRegions.push({box:[0.94,0,0,1,1,1],rule:"solid"}); renderRegions(); };
   }
@@ -1462,7 +1550,8 @@ async function runRevision(){
     (cfg.supports||[]).forEach((s,i)=>{for(let o=0;o<6;o++){const e=g("sup-"+i+"-"+o); if(e)s.box[o]=+e.value/100;}});
     (cfg.loads||[]).forEach((l,i)=>{for(let o=0;o<6;o++){const e=g("load-"+i+"-"+o); if(e)l.box[o]=+e.value/100;} l.dir=JSON.parse(g("dir-"+i).value);});
     syncRegionsFromDOM();                                // Phase 2 keep-regions
-    const regs=(S.editRegions||[]).filter(r=>r.box[3]>r.box[0]&&r.box[4]>r.box[1]&&r.box[5]>r.box[2]);
+    const regs=(S.editRegions||[]).filter(r=>(r.tris&&r.tris.length)||
+      (r.box&&r.box[3]>r.box[0]&&r.box[4]>r.box[1]&&r.box[5]>r.box[2]));
     if(regs.length) cfg.regions=regs; else delete cfg.regions;
   } else { for(const k of Object.keys(cfg.params)){const e=g("param-"+k); if(e)cfg.params[k]=+e.value;} }
   const rs=$("#dRecipe").dataset.style; if(rs) cfg.style=rs; else delete cfg.style;   // restyle (S2)

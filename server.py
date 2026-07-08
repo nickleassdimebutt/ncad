@@ -579,17 +579,34 @@ def spawn_variant(parent, domain, bc, seed, label, quality, style=None):
 
 
 def clean_regions(cfg):
-    """Phase 2 keep-regions: [{box:[6 normalized], rule:'solid'|'void'|'preserve'}].
-    Drops malformed / zero-volume boxes; caps the count."""
+    """Phase 2 keep-regions: [{rule:'solid'|'void'|'preserve', box:[6 normalized]}]
+    OR a per-face patch [{rule, tris:[[9 normalized],...], box:[6 aabb]}]. Drops
+    malformed / zero-volume entries; caps the count and per-patch triangle load."""
     out = []
     for r in (cfg.get("regions") or [])[:24]:
         if not isinstance(r, dict):
             continue
+        rule = r.get("rule") if r.get("rule") in ("solid", "void", "preserve") else "solid"
         try:
             box = [max(0.0, min(1.0, float(v))) for v in (r.get("box") or [])][:6]
         except (TypeError, ValueError):
+            box = []
+        tris = r.get("tris")
+        if isinstance(tris, list) and tris:                    # per-face patch
+            clean = []
+            for t in tris[:4000]:                              # cap per-patch load
+                try:
+                    row = [max(0.0, min(1.0, float(v))) for v in t][:9]
+                except (TypeError, ValueError):
+                    continue
+                if len(row) == 9:
+                    clean.append(row)
+            if clean:
+                entry = {"rule": rule, "tris": clean}
+                if len(box) == 6:
+                    entry["box"] = box                         # aabb (sentence + preserve pin)
+                out.append(entry)
             continue
-        rule = r.get("rule") if r.get("rule") in ("solid", "void", "preserve") else "solid"
         if len(box) == 6 and box[3] > box[0] and box[4] > box[1] and box[5] > box[2]:
             out.append({"box": box, "rule": rule})
     return out

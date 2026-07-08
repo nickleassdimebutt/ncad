@@ -127,6 +127,32 @@ def elements_in_box(box, nx, ny, nz):
     return mx[:, None, None] & my[None, :, None] & mz[None, None, :]
 
 
+def voxels_from_tris(tris, nx, ny, nz):
+    """Per-face keep region: rasterize a triangle patch (normalized [0,1] coords,
+    shape (T,3,3)) into a thin ELEMENT surface-shell mask by dense barycentric
+    sampling. Unlike a box, this captures the *exact* footprint of a clicked face
+    (an L-shaped pad, a partial side) rather than its whole bounding slab."""
+    mask = np.zeros((nx, ny, nz), bool)
+    tris = np.asarray(tris, float)
+    if tris.ndim == 2 and tris.shape[1] == 9:              # wire format: rows of 9 → (T,3,3)
+        tris = tris.reshape(-1, 3, 3)
+    if tris.ndim != 3 or tris.shape[1:] != (3, 3) or len(tris) == 0:
+        return mask
+    dims = np.array([nx, ny, nz], float)
+    step = 0.4 * min(1.0 / nx, 1.0 / ny, 1.0 / nz)         # ~0.4 cell → no gaps
+    for a, b, c in tris:
+        e1, e2 = b - a, c - a
+        span = max(np.linalg.norm(e1), np.linalg.norm(e2), 1e-9)
+        n = int(min(64, max(2, np.ceil(span / step))))     # samples per edge
+        u = np.linspace(0.0, 1.0, n)
+        uu, vv = np.meshgrid(u, u)
+        keep = (uu + vv) <= 1.0                             # barycentric triangle
+        pts = a + uu[keep][:, None] * e1 + vv[keep][:, None] * e2
+        idx = np.clip(np.floor(pts * dims).astype(int), 0, dims.astype(int) - 1)
+        mask[idx[:, 0], idx[:, 1], idx[:, 2]] = True
+    return mask
+
+
 def write_stl(path, verts, faces):
     """Binary STL from marching-cubes output."""
     tri = verts[faces]                                     # (n, 3, 3)
@@ -546,16 +572,25 @@ def main():
     preserve_boxes = []
     for r in (cfg.get("regions") or []):
         b = r.get("box")
-        if not (isinstance(b, (list, tuple)) and len(b) == 6):
+        has_box = isinstance(b, (list, tuple)) and len(b) == 6
+        tris = r.get("tris")
+        if tris:                                 # per-face patch → exact surface shell
+            m = voxels_from_tris(tris, nx, ny, nz)
+            if not m.any():
+                continue
+            m = ndimage.binary_dilation(m)       # 1-voxel skin → 3-voxel robust band
+        elif has_box:                            # legacy axis-aligned box
+            m = elements_in_box([float(v) for v in b], nx, ny, nz)
+        else:
             continue
-        m = elements_in_box([float(v) for v in b], nx, ny, nz)
         rule = r.get("rule", "solid")
         if rule == "void":
             void_mask |= m
         elif rule == "preserve":
             solid_mask |= m
             preserve_mask |= m
-            preserve_boxes.append([float(v) for v in b])
+            if has_box:                          # pin these verts flat during smoothing
+                preserve_boxes.append([float(v) for v in b])
         else:                                    # solid / keep-filled
             solid_mask |= m
     solid_mask &= ~void_mask                      # void takes precedence
