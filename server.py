@@ -332,11 +332,13 @@ TOPO_PYTHON = APP_DIR / ".venv" / "bin" / "python"
 # QUALITY = depth of ONE result. A finer voxel mesh is the #1 lever toward
 # organic / bone-like geometry (coarse meshes can only make chunky blobs); more
 # iterations let compliance converge. Draft stays on the fast direct solver
-# (ndof<=60k → spsolve); Fine crosses into the iterative CG path (slower).
+# (ndof<=60k -> spsolve); Fine crosses into the iterative CG path (slower).
+# Ultra is a final-pass mesh: roughly 4x Fine's elements for less voxel banding.
 QUALITY_PRESETS = {
     "draft":    {"target_elems": 8000,  "max_iters": 50,  "label": "Draft"},
     "balanced": {"target_elems": 16000, "max_iters": 90,  "label": "Balanced"},
     "fine":     {"target_elems": 32000, "max_iters": 130, "label": "Fine"},
+    "ultra":    {"target_elems": 128000, "max_iters": 160, "label": "Ultra"},
 }
 DEFAULT_QUALITY = "draft"
 

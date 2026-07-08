@@ -632,7 +632,7 @@ function mountGate(){
     '<div class="gaterow"><span class="gk">Style</span><div id="gStyle"></div></div>'+
     '<div id="structOpts"'+(eng==="structural"?"":' style="display:none"')+'>'+
       '<div class="gaterow"><span class="gk">Quality</span><span>'+
-        segHTML("qual",[["draft","Draft"],["balanced","Balanced"],["fine","Fine"]],sp.quality)+
+        segHTML("qual",[["draft","Draft"],["balanced","Balanced"],["fine","Fine"],["ultra","Ultra"]],sp.quality)+
         '<div class="rationale" id="qualWhy"></div></span></div>'+
       '<div class="gaterow"><span class="gk">Creativity</span><span>'+
         segHTML("crea",[["focused","Focused"],["explore","Explore"],["wild","Wild"]],sp.creativity)+
@@ -665,7 +665,7 @@ function wireSeg(name,onpick){
   const bs=[...document.querySelectorAll('[data-seg="'+name+'"] button')];
   bs.forEach(b=>b.onclick=()=>{ bs.forEach(x=>x.className=x===b?"on":""); onpick(b.dataset.v); });
 }
-const QSECS={draft:130,balanced:340,fine:820};      // rough per-solve seconds, for ETA
+const QSECS={draft:130,balanced:340,fine:820,ultra:2400};  // rough per-solve seconds, for ETA
 const CVAR={focused:1,explore:3,wild:6};             // variant count per creativity level
 /* deterministic gap-check → confirm-not-ask chips. Hard floor: always surface
    engine + units; flag an inferred size when the brief carried no numbers. */
@@ -727,7 +727,7 @@ function applyStylePrefill(k){
   const sp=S.session&&S.session.spec, s=k&&S.styles&&S.styles.styles&&S.styles.styles[k];
   if(!sp||!s) return;
   const qp=s.structural&&s.structural.quality_pref;
-  if(qp && ["draft","balanced","fine"].includes(qp)){
+  if(qp && ["draft","balanced","fine","ultra"].includes(qp)){
     sp.quality=qp;
     document.querySelectorAll('[data-seg="qual"] button').forEach(b=>b.className=b.dataset.v===qp?"on":"");
     updateGateNotes();
@@ -736,7 +736,8 @@ function applyStylePrefill(k){
 function updateGateNotes(){
   const sp=S.session.spec, q=sp.quality||"draft", c=sp.creativity||"focused";
   const qw=$("#qualWhy"); if(qw) qw.textContent={draft:"Coarse mesh — fast, chunky.",
-    balanced:"Medium mesh — a solid default.",fine:"Fine mesh — slow, lean, more organic."}[q];
+    balanced:"Medium mesh — a solid default.",fine:"Fine mesh — slow, lean, more organic.",
+    ultra:"Ultra mesh — final-pass detail, less voxel banding."}[q];
   const n=CVAR[c], cw=$("#creaWhy");
   if(cw) cw.textContent = n>1
     ? n+" divergent variants, solved back-to-back (~"+fmtDur(n*QSECS[q])+" total). Compare compliance in the tree."
@@ -1605,7 +1606,7 @@ function renderRecipe(j){
        ["x","y","z"].map((a,i)=>'<input type="number" step="any" value="'+cfg.domain_mm[i]+'" data-r="dom-'+i+'">').join(" × ")+'</span></div>'+
        '<div class="rl"><span class="rk">keep material</span><span class="rv"><input type="number" min="10" max="60" value="'+Math.round(cfg.volfrac*100)+'" data-r="volfrac"> %</span></div>'+
        '<div class="rl"><span class="rk">quality</span><span class="rv"><select data-r="quality" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
-         ['draft','balanced','fine'].map(q=>'<option value="'+q+'"'+((cfg.quality||"draft")===q?" selected":"")+'>'+q+'</option>').join("")+'</select></span></div>'+
+         ['draft','balanced','fine','ultra'].map(q=>'<option value="'+q+'"'+((cfg.quality||"draft")===q?" selected":"")+'>'+q+'</option>').join("")+'</select></span></div>'+
        '<div class="rl"><span class="rk">mesh detail</span><span class="rv"><select data-r="mesh_detail" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          [[1,'coarse'],[2,'smooth'],[3,'fine']].map(o=>'<option value="'+o[0]+'"'+((+cfg.mesh_detail||2)===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select> <span class="hint">surface only</span></span></div>'+
        (cfg.seed!=null?'<div class="rl"><span class="rk">seed</span><span class="rv">'+esc(cfg.seed)+(cfg.variant_label?" · "+esc(cfg.variant_label):"")+'</span></div>':'');
