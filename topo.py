@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""topo.py — 3D SIMP topology optimization for genloop's structural engine.
+"""topo.py — 3D SIMP topology optimization for nCAD's structural engine.
 
 Deterministic, dependency-light (numpy/scipy/scikit-image/matplotlib).
 Classic compliance minimization: H8 voxel elements, SIMP penalization,
@@ -160,7 +160,7 @@ def write_stl(path, verts, faces):
     norm = np.linalg.norm(n, axis=1, keepdims=True)
     n = np.divide(n, norm, out=np.zeros_like(n), where=norm > 0)
     with open(path, "wb") as f:
-        f.write(b"genloop topo".ljust(80, b"\0"))
+        f.write(b"nCAD topo".ljust(80, b"\0"))
         f.write(struct.pack("<I", len(faces)))
         for i in range(len(faces)):
             f.write(struct.pack("<3f", *n[i]))

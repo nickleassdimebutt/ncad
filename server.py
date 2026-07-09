@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""genloop — local generative-design loop for the AgentCAD stack.
+"""nCAD — local generative-design loop for the AgentCAD stack.
 
 The browser posts a spec; a single worker thread runs the loop:
   1. codex-hermes (local LLM) writes/edits design.py in the project dir
@@ -8,9 +8,10 @@ The browser posts a spec; a single worker thread runs the loop:
   4. check-spec + bbox comparison verify against the user's numbers
   5. failures become a structured feedback block for the next iteration
 
-Stdlib only. Binds 127.0.0.1. Serves files only from under ~/Documents/CAD.
+Stdlib only. Binds 127.0.0.1 by default. Serves files only from the configured
+CAD workspace, which defaults to ~/Documents/CAD.
 Jobs persist as <project>/job.json and reload on restart.
-Run:  ~/Documents/CAD/.venv/bin/python ~/Documents/CAD/genloop/server.py
+Run:  bin/ncad
 """
 import ast
 import copy
@@ -20,29 +21,68 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-CAD_ROOT = (Path.home() / "Documents" / "CAD").resolve()
-APP_DIR = Path(__file__).resolve().parent
-AGENTCAD = str(CAD_ROOT / ".venv" / "bin" / "agentcad")
-CAD_PYTHON = str(CAD_ROOT / ".venv" / "bin" / "python")   # build123d venv (STEP/IGES import)
+
+def env_path(name, default):
+    raw = os.environ.get(name)
+    return Path(raw).expanduser().resolve() if raw else Path(default).expanduser().resolve()
+
+
+def env_int(name, default):
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def venv_tool(venv, tool):
+    bindir = "Scripts" if os.name == "nt" else "bin"
+    suffix = ".exe" if os.name == "nt" and not tool.endswith(".exe") else ""
+    return str(Path(venv) / bindir / f"{tool}{suffix}")
+
+
+def default_trash_dir():
+    if sys.platform == "darwin":
+        return Path.home() / ".Trash"
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+        return Path(base) / "nCAD" / "Trash"
+    return Path.home() / ".local" / "share" / "ncad" / "Trash"
+
+
+APP_DIR = env_path("NCAD_APP_DIR", Path(__file__).resolve().parent)
+CAD_ROOT = env_path("NCAD_CAD_ROOT", Path.home() / "Documents" / "CAD")
+ENGINE_VENV = env_path("NCAD_ENGINE_VENV", CAD_ROOT / ".venv")
+SOLVER_VENV = env_path("NCAD_SOLVER_VENV", APP_DIR / ".venv")
+TRASH_DIR = env_path("NCAD_TRASH_DIR", default_trash_dir())
+AGENTCAD = venv_tool(ENGINE_VENV, "agentcad")
+CAD_PYTHON = venv_tool(ENGINE_VENV, "python")              # build123d venv (STEP/IGES import)
 UPLOAD_MAX = 150 * 1024 * 1024                            # Phase 3: max upload size
 MAX_UPLOAD_TRIS = 2_000_000                               # matches topo.MAX_STL_TRIS (voxel cost)
 # Generation is ONE direct chat call to LM Studio — we only need file
 # content, so the multi-turn codex machinery (slow, wedge-prone under a
 # server) is deliberately not used here. codex-hermes remains the tool for
 # interactive/agentic sessions.
-LMS_API = "http://127.0.0.1:1234"
-HOST, PORT = "127.0.0.1", 8765
+LMS_API = (os.environ.get("NCAD_LMS_API") or "http://127.0.0.1:1234").rstrip("/")
+HOST, PORT = os.environ.get("NCAD_HOST") or "127.0.0.1", env_int("NCAD_PORT", 8765)
+AUTO_START_LMS = (os.environ.get("NCAD_AUTO_START_LMS") or "1").lower() not in ("0", "false", "no")
 GEN_TIMEOUT_S = 5 * 60
 BUILD_TIMEOUT_S = 5 * 60
 JOB_WALL_CLOCK_S = 2 * 60 * 60
 MAX_ITERS_CAP = 8
+RESERVED_PROJECT_DIRS = {".venv", "genloop", "ncad", APP_DIR.name.lower()}
 
 JOBS = {}          # job_id -> job dict
 JOB_ORDER = []     # queue of job_ids for the single worker
@@ -50,13 +90,15 @@ ACTIVE_JOB = {"id": None}   # the job the worker is actually running (incl. init
 LOCK = threading.Lock()
 WAKE = threading.Event()
 ACTIVE = {"job_id": None, "proc": None}   # for cancel
+LM_START_LOCK = threading.Lock()
+LM_START = {"last_attempt": 0.0}
 
 
 # ---------------------------------------------------------------- job model
 
 def new_job(payload):
     name = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(payload.get("name", ""))[:60]).strip("-").lower()
-    if not name or name in ("genloop", ".venv"):
+    if not name or name.lower() in RESERVED_PROJECT_DIRS:
         raise ValueError("project name is required (letters/digits/dashes)")
     features = []
     for f in payload.get("features", []):
@@ -245,17 +287,29 @@ def mock_design(job):
 
 def kill_tree(proc):
     try:
-        os.killpg(proc.pid, 15)
-        time.sleep(1.5)
-        os.killpg(proc.pid, 9)
+        if os.name == "nt":
+            proc.terminate()
+            time.sleep(1.5)
+            if proc.poll() is None:
+                proc.kill()
+        else:
+            os.killpg(proc.pid, 15)
+            time.sleep(1.5)
+            os.killpg(proc.pid, 9)
     except (ProcessLookupError, PermissionError):
         pass
 
 
+def popen_args():
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
 def run_cmd(job, argv, cwd, timeout, env=None):
     """Popen in its own process group, registered so POST /cancel can kill it."""
-    proc = subprocess.Popen(argv, cwd=cwd, env=env, text=True, start_new_session=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **popen_args())
     with LOCK:
         ACTIVE["job_id"], ACTIVE["proc"] = job["id"], proc
     try:
@@ -272,10 +326,107 @@ def run_cmd(job, argv, cwd, timeout, env=None):
 
 # --------------------------------------------------- direct LLM generation
 
+def lms_cli():
+    override = os.environ.get("NCAD_LMS_CLI")
+    if override:
+        p = Path(override).expanduser()
+        return str(p) if p.exists() else override
+    found = shutil.which("lms")
+    if found:
+        return found
+    local = Path.home() / ".lmstudio" / "bin" / ("lms.exe" if os.name == "nt" else "lms")
+    return str(local) if local.exists() else None
+
+
+def local_lms_target():
+    try:
+        u = urllib.parse.urlparse(LMS_API)
+    except ValueError:
+        return None
+    if u.scheme not in ("http", "https"):
+        return None
+    host = u.hostname or ""
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        return None
+    return {"host": host, "port": u.port or 1234}
+
+
+def fetch_lmstudio_models(timeout=10):
+    with urllib.request.urlopen(f"{LMS_API}/api/v0/models", timeout=timeout) as r:
+        return json.load(r)
+
+
+def start_lmstudio_server():
+    """Start LM Studio's local OpenAI-compatible server when nCAD targets localhost."""
+    if not AUTO_START_LMS:
+        return False
+    target = local_lms_target()
+    cmd = lms_cli()
+    if not target or not cmd:
+        return False
+    with LM_START_LOCK:
+        try:
+            fetch_lmstudio_models(timeout=1)
+            return True
+        except (OSError, TimeoutError, urllib.error.URLError):
+            pass
+        now = time.time()
+        if now - LM_START["last_attempt"] < 4:
+            return False
+        LM_START["last_attempt"] = now
+        try:
+            subprocess.run([cmd, "server", "start", "-p", str(target["port"])],
+                           capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"nCAD: could not auto-start LM Studio server: {exc}", flush=True)
+            return False
+    for _ in range(30):
+        try:
+            fetch_lmstudio_models(timeout=1)
+            return True
+        except (OSError, TimeoutError, urllib.error.URLError):
+            time.sleep(0.25)
+    return False
+
+
+def warm_lmstudio_server():
+    """Kick the local LM Studio API awake on UI open/refresh without delaying HTML."""
+    if not AUTO_START_LMS or not local_lms_target():
+        return
+    def run():
+        try:
+            fetch_lmstudio_models(timeout=1)
+        except (OSError, TimeoutError, urllib.error.URLError):
+            start_lmstudio_server()
+    threading.Thread(target=run, daemon=True).start()
+
+
+def lmstudio_models():
+    try:
+        return fetch_lmstudio_models(timeout=10)
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        if start_lmstudio_server():
+            try:
+                return fetch_lmstudio_models(timeout=10)
+            except (OSError, TimeoutError, urllib.error.URLError) as exc2:
+                exc = exc2
+        raise lmstudio_unavailable(exc) from exc
+
+
+def lmstudio_unavailable(exc):
+    reason = getattr(exc, "reason", exc)
+    autostart = ""
+    if AUTO_START_LMS and local_lms_target():
+        autostart = " nCAD tried to start it automatically but could not reach it."
+    return RuntimeError(
+        f"Cannot reach LM Studio at {LMS_API}.{autostart} Start LM Studio, "
+        "load a chat model, or set NCAD_LMS_API to the machine running it. "
+        f"({reason})")
+
+
 def loaded_model(pref):
     """Which chat model is loaded in LM Studio; honor a local-qwen/gemma pref."""
-    with urllib.request.urlopen(f"{LMS_API}/api/v0/models", timeout=10) as r:
-        data = json.load(r)
+    data = lmstudio_models()
     loaded = [m["id"] for m in data.get("data", [])
               if m.get("state") == "loaded" and m.get("type") != "embeddings"]
     want = {"local-qwen": "qwen", "local-gemma": "gemma"}.get(pref)
@@ -299,7 +450,7 @@ def chat(job, system, user, max_tokens=6000):
     """One chat completion against LM Studio. Returns (text, model_id)."""
     model = loaded_model(job["model"])
     if not model:
-        raise RuntimeError("no chat model is loaded in LM Studio — load one (`lms load`) and resubmit"
+        raise RuntimeError("LM Studio is reachable, but no chat model is loaded. Load a chat model and resubmit"
                            if job["model"] == "auto"
                            else f"requested model '{job['model']}' is not loaded in LM Studio")
     body = json.dumps({
@@ -311,8 +462,11 @@ def chat(job, system, user, max_tokens=6000):
     }).encode()
     req = urllib.request.Request(f"{LMS_API}/v1/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=GEN_TIMEOUT_S) as r:
-        out = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=GEN_TIMEOUT_S) as r:
+            out = json.load(r)
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        raise lmstudio_unavailable(exc) from exc
     return out["choices"][0]["message"]["content"], model
 
 
@@ -327,7 +481,7 @@ def generate_direct(job, prompt):
 # --------------------------------------------- structural (topology opt.)
 
 TOPO_PY = APP_DIR / "topo.py"
-TOPO_PYTHON = APP_DIR / ".venv" / "bin" / "python"
+TOPO_PYTHON = venv_tool(SOLVER_VENV, "python")
 
 # QUALITY = depth of ONE result. A finer voxel mesh is the #1 lever toward
 # organic / bone-like geometry (coarse meshes can only make chunky blobs); more
@@ -555,13 +709,16 @@ def variant_combos(concepts, cp):
     return combos
 
 
-def spawn_variant(parent, domain, bc, seed, label, quality, style=None):
+def spawn_variant(parent, domain, bc, seed, label, quality, style=None, extra=None):
     """Queue a sibling structural job carrying a pre-resolved load case (skips the
     LLM, like a revision) under the parent's root so the tree nests it."""
     cfg = {"engine": "structural", "domain_mm": [float(v) for v in domain],
            "volfrac": bc.get("volfrac", 0.3), "quality": quality,
            "supports": bc["supports"], "loads": bc["loads"],
            "seed": seed, "variant_label": label}
+    for k in ("regions", "mesh_detail", "domain_stl"):
+        if isinstance(extra, dict) and k in extra:
+            cfg[k] = copy.deepcopy(extra[k])
     if style in STYLES:
         cfg["style"] = style
     base = re.sub(r"-v\d+$", "", parent["name"])
@@ -652,6 +809,8 @@ def run_structural_job(job, proj):
     qkey = ((override or {}).get("quality") if override else job.get("quality"))
     qkey = qkey if qkey in QUALITY_PRESETS else DEFAULT_QUALITY
     quality = QUALITY_PRESETS[qkey]
+    ckey = ((override or {}).get("creativity") if override else job.get("creativity"))
+    ckey = ckey if ckey in CREATIVITY_PRESETS else DEFAULT_CREATIVITY
     # STYLE (aesthetic preset) comes from the revision config if present, else the
     # job's own knob. The bundle biases geometry deterministically (S3/S5) + colors
     # the render (S1). None = no style.
@@ -668,6 +827,15 @@ def run_structural_job(job, proj):
             seed = override.get("seed")
             label = str(override.get("variant_label") or "")[:24]
             log(job, "using edited load case" + (f" — variant '{label}'" if label else " — revision") + " (no LLM)")
+            cp = creativity_preset(ckey)
+            total = max(1, cp["concepts"] * cp["seeds"])
+            if total > 1 and not label:
+                domain0 = list((override or {}).get("domain_mm") or
+                               [job["bbox"]["x"], job["bbox"]["y"], job["bbox"]["z"]])
+                for i in range(1, total):
+                    spawn_variant(job, domain0, bc, 5100 + i, f"revision s{i}",
+                                  qkey, skey, extra=override)
+                log(job, f"creativity '{ckey}': queued {total - 1} seeded revision variants")
         except (ValueError, TypeError) as exc:
             log(job, f"invalid config: {exc}")
             set_state(job, "error")
@@ -782,7 +950,7 @@ def run_structural_job(job, proj):
     with LOCK:
         job["config"] = {"engine": "structural", "domain_mm": domain,
                          "volfrac": cfg["volfrac"], "quality": qkey,
-                         "mesh_detail": cfg["mesh_detail"],
+                         "creativity": ckey, "mesh_detail": cfg["mesh_detail"],
                          "supports": bc["supports"], "loads": bc["loads"]}
         if regions:
             job["config"]["regions"] = regions
@@ -807,8 +975,7 @@ def run_structural_job(job, proj):
 
     proc = subprocess.Popen(
         [str(TOPO_PYTHON), str(TOPO_PY), str(proj / "topo-config.json"), str(outdir)],
-        cwd=proj, text=True, start_new_session=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cwd=proj, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **popen_args())
     with LOCK:
         ACTIVE["job_id"], ACTIVE["proc"] = job["id"], proc
     final = None
@@ -1472,7 +1639,10 @@ def synthesize_spec(session):
         'Use "structural" when the request is about carrying loads with minimal',
         'material (organic/optimized shapes); use "stack" for conventional',
         'parametric parts (plates, flanges, enclosures, brackets with exact faces).',
-        'Screw/bolt holes go in "features". bbox is the overall size envelope.',
+        'Use "features" only for exact circular holes when engine is "stack".',
+        'For structural topology output, keep bolt/interface needs in the brief and',
+        'leave features empty; topology revisions use supports/loads/keep-regions.',
+        'bbox is the overall size envelope.',
         "STYLE is the aesthetic design language — pick the KEY whose vibe best fits",
         "the request (or null if none clearly fits). Options (key — vibe, engine):",
         *[f"  {k} — {b.get('blurb','')} ({b.get('engine_affinity')})"
@@ -1593,13 +1763,13 @@ def submit_internal(payload):
 # -------------------------------------------------- workspace watcher
 
 def workspace():
-    """Read-only view of ALL agentcad output in ~/Documents/CAD — including
-    work done outside genloop (Hermes TUI sessions, manual runs). Each
+    """Read-only view of all agentcad output in the configured CAD workspace,
+    including work done outside nCAD (Hermes TUI sessions, manual runs). Each
     version dir already carries meta.json + preview.png."""
     projects = {}
     for meta_file in CAD_ROOT.glob("*/v*_*/meta.json"):
         pdir = meta_file.parent.parent
-        if pdir.name in ("genloop", ".venv"):
+        if pdir.name.lower() in RESERVED_PROJECT_DIRS:
             continue
         try:
             meta = json.loads(meta_file.read_text())
@@ -1665,6 +1835,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local():
             return self._send(403, {"error": "local only"})
         if self.path in ("/", "/index.html"):
+            warm_lmstudio_server()
             return self._send(200, (APP_DIR / "index.html").read_bytes(),
                               "text/html; charset=utf-8")
         if self.path == "/api/jobs":
@@ -1851,6 +2022,8 @@ class Handler(BaseHTTPRequestHandler):
                         except (TypeError, ValueError):
                             pass
                     src_feats = p.get("features") if isinstance(p.get("features"), list) else base["features"]
+                    if engine == "structural":
+                        src_feats = []
                     feats = []
                     for f in (src_feats or [])[:12]:
                         try:
@@ -1920,7 +2093,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, KeyError, json.JSONDecodeError) as exc:
                 return self._send(400, {"error": str(exc)})
             except Exception as exc:
-                return self._send(500, {"error": f"{exc!r}"})
+                return self._send(500, {"error": str(exc)})
 
         # ---- revisions: user edited the recipe; rerun deterministically
         m = re.match(r"^/api/jobs/([0-9a-f]+)/revise$", self.path)
@@ -1946,9 +2119,12 @@ class Handler(BaseHTTPRequestHandler):
                 # the edited recipe IS the new spec — derive the verification
                 # gates from it, or the old gates would "correct" the edits away
                 bbox, features = src["bbox"], src["features"]
+                quality = cfg.get("quality") if cfg.get("quality") in QUALITY_PRESETS else src.get("quality", DEFAULT_QUALITY)
+                creativity = cfg.get("creativity") if cfg.get("creativity") in CREATIVITY_PRESETS else src.get("creativity", DEFAULT_CREATIVITY)
                 if src["generator"] == "structural" and isinstance(cfg.get("domain_mm"), list) \
                         and len(cfg["domain_mm"]) == 3:
                     bbox = dict(zip("xyz", [float(v) for v in cfg["domain_mm"]]))
+                    features = []
                 if src["generator"] == "stack" and cfg.get("template") in TEMPLATES:
                     t = TEMPLATES[cfg["template"]]
                     prm = {k: v["default"] for k, v in t["params"].items()}
@@ -1975,6 +2151,7 @@ class Handler(BaseHTTPRequestHandler):
                     "name": f"{base}-r{n}", "brief": src["brief"], "bbox": bbox,
                     "features": features, "objective": src["objective"],
                     "generator": src["generator"], "config": cfg,
+                    "quality": quality, "creativity": creativity,
                     "style": cfg.get("style"),      # restyle shows immediately, not just once it runs
                     "root": src.get("root") or src["id"],
                 })
@@ -1993,12 +2170,13 @@ class Handler(BaseHTTPRequestHandler):
                 if job["id"] in JOB_ORDER:
                     JOB_ORDER.remove(job["id"])
                 del JOBS[job["id"]]
-            # reversible: the project dir goes to the macOS Trash, never hard-deleted
+            # reversible: the project dir goes to a per-OS trash folder, never hard-deleted
             pdir = (CAD_ROOT / job["name"]).resolve()
             trashed = None
             if (pdir.is_dir() and pdir != CAD_ROOT and pdir.parent == CAD_ROOT
-                    and pdir.name not in ("genloop", ".venv")):
-                dest = Path.home() / ".Trash" / f"ncad-{job['name']}-{job['id']}"
+                    and pdir.name.lower() not in RESERVED_PROJECT_DIRS):
+                TRASH_DIR.mkdir(parents=True, exist_ok=True)
+                dest = TRASH_DIR / f"ncad-{job['name']}-{job['id']}"
                 try:
                     shutil.move(str(pdir), str(dest))
                     trashed = str(dest)

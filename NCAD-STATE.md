@@ -6,17 +6,23 @@ is the LOCAL model (qwen3.6-35b via LM Studio) used ONLY to configure/interpret;
 ALL geometry is deterministic. One GPU → jobs run strictly serial.
 
 ## Locations & commands
-- GIT: `~/Documents/CAD/genloop/` is now a git repo (branch `main`, initial commit
-  `a4f815f`, 2026-07-06). Source only (.gitignore excludes .venv/__pycache__/.bak/
-  .DS_Store). No remote. COMMIT future changes here (was un-versioned before this).
-- App dir: `~/Documents/CAD/genloop/` — `server.py` (Python stdlib HTTP, port 8765),
+- GIT: `~/Documents/GitHub/nCAD/` is the local repo on branch `main`, tracking
+  `git@github.com:nickleassdimebutt/ncad.git`. Source only (.gitignore excludes
+  .venv/__pycache__/.bak/.DS_Store/server.log).
+- App dir: `~/Documents/GitHub/nCAD/` — `server.py` (Python stdlib HTTP, port 8765),
   `index.html` (single-file vanilla JS/CSS UI), `topo.py` (SIMP solver),
   `templates/` (parametric templates + manifest.json).
-- Engine venv: `~/Documents/CAD/.venv` (agentcad 0.3.1 + build123d 0.10). Solver venv:
-  `~/Documents/CAD/genloop/.venv` (numpy/scipy/scikit-image/matplotlib).
-- Launch: `ncad` (opens UI, starts server if down) — `~/.local/bin/ncad`. Desktop
-  shortcut: `~/Desktop/nCAD.command`. Old UI backup: `index.html.bak-*`.
-- Preview during dev: preview_start "genloop" → serverId; the server reads index.html
+- Generated projects/workspace: `~/Documents/CAD/` by default, configurable with
+  `NCAD_CAD_ROOT`.
+- Engine venv: `~/Documents/CAD/.venv` by default (agentcad 0.3.1 + build123d 0.10).
+  Solver venv: `~/Documents/GitHub/nCAD/.venv` by default
+  (numpy/scipy/scikit-image/matplotlib; scikit-sparse optional).
+- Bootstrap: `bin/bootstrap` (macOS/Linux) or `bin/bootstrap.ps1` (Windows) recreates
+  disposable venvs from requirements manifests.
+- Launch: `ncad` (opens UI, starts server if down) — `~/.local/bin/ncad` should point
+  to `~/Documents/GitHub/nCAD/bin/ncad`. Desktop shortcut: `~/Desktop/nCAD.command`.
+  Old UI backup: `index.html.bak-*`.
+- Preview during dev: start from `~/Documents/GitHub/nCAD`; the server reads index.html
   fresh per request (HTML edits need only a reload; server.py edits need a restart).
 - Design proposal (the spec we're building to): Artifact
   https://claude.ai/code/artifact/9423c285-c1d3-4d33-9354-495a4af110ba ; full text at
@@ -348,7 +354,7 @@ process tree hangs off Claude.app only because the server is launched via previe
   warm#ff8a5c(structural/load) ok#57d38a warn#e8c268 bad#ef6b6b; mono=ui-monospace.
 
 ## Verification method
-preview_* tools (start "genloop", eval/snapshot/screenshot — screenshots go mobile-width unless
+preview_* tools (start "nCAD", eval/snapshot/screenshot — screenshots go mobile-width unless
 preview_resize to 1280×860). Real runs: parametric ~12s, structural ~2min. Adversarial review
 via Codex: `codex exec --profile circuitslug -s read-only --skip-git-repo-check -` (heredoc),
 triage findings against the diff. Local model = qwen via LM Studio; if "no chat model loaded",

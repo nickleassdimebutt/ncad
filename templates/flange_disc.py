@@ -1,4 +1,4 @@
-# genloop template: circular flange — disc, center bore, bolt circle,
+# nCAD template: circular flange — disc, center bore, bolt circle,
 # optional hub boss. All scalars overridable via --params.
 od = 80.0
 thickness = 8.0

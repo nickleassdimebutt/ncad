@@ -265,9 +265,12 @@
   .rc input{width:64px;padding:3px 5px;font-size:11.5px;display:inline-block}
   .rc .grp{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cool);margin:12px 0 5px}
   .rc .box6{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+  .rc .box6.range{margin-top:5px}
+  .rc .box6.range label{width:55px}
   .rc .box6 label{font-size:9.5px;color:var(--faint);width:auto;margin:0}
   .rc .box6 input{width:48px}
   .rc .sen{font-size:11.5px;color:var(--dim);margin:8px 0 2px}
+  .rc .bcnote{font-size:10.5px;color:var(--faint);line-height:1.35;margin:0 0 4px}
   .rc .regx{float:right;background:none;border:none;color:var(--bad);cursor:pointer;font-size:11px;padding:0 2px;line-height:1}
   .rc .regx:hover{color:#ff6b6b}
   /* structural face-picker: click a cube face to snap a support/load region */
@@ -642,8 +645,10 @@ function mountGate(){
       ["x","y","z"].map(a=>'<input type="number" step="any" value="'+(sp.bbox[a]??"")+'" id="gb_'+a+'" style="width:78px;display:inline-block">').join(' <span class="conv">×</span> ')+
       ' <span class="conv">mm</span></span></div>'+
     '<div class="gaterow"><span class="gk">Objective</span><input id="gObj" value="'+escAttr(sp.objective||"")+'"></div>'+
-    '<div class="gaterow"><span class="gk">Holes / features</span><div id="gFeats">'+(feats||'<span class="hint">none</span>')+'</div></div>'+
-    '<div style="margin-left:146px;margin-top:2px"><button class="ghost" id="gAddF">+ add feature</button></div>'+
+    '<div id="featBlock"'+(eng==="stack"?"":' style="display:none"')+'>'+
+      '<div class="gaterow"><span class="gk">Exact holes</span><div id="gFeats">'+(feats||'<span class="hint">none</span>')+'</div></div>'+
+      '<div style="margin-left:146px;margin-top:2px"><button class="ghost" id="gAddF">+ add hole</button></div>'+
+    '</div>'+
     schematicSVG(sp)+
     '<div style="display:flex;gap:12px;margin-top:18px"><button class="ghost" id="gBack">← edit brief</button>'+
       '<button class="btn '+(eng==="structural"?"warm":"")+'" id="gRun" style="flex:1">Run '+(eng==="structural"?"topology solve":"build")+' →</button></div>'+
@@ -652,8 +657,8 @@ function mountGate(){
 }
 function featRow(f,i){
   return '<div class="feat" data-fi="'+i+'"><input value="'+escAttr(f.name||"")+'" data-k="name">'+
-    '<input type="number" step="any" value="'+(f.diameter_mm??"")+'" data-k="diameter_mm" placeholder="⌀mm">'+
-    '<input type="number" min="1" value="'+(f.count??"")+'" data-k="count" placeholder="n">'+
+    '<input type="number" step="any" value="'+(f.diameter_mm??"")+'" data-k="diameter_mm" placeholder="diameter mm">'+
+    '<input type="number" min="1" value="'+(f.count??"")+'" data-k="count" placeholder="count">'+
     '<button title="remove" onclick="this.parentNode.remove()">×</button></div>';
 }
 /* small neutral segmented control (quality / creativity) */
@@ -667,6 +672,10 @@ function wireSeg(name,onpick){
 }
 const QSECS={draft:130,balanced:340,fine:820,ultra:2400};  // rough per-solve seconds, for ETA
 const CVAR={focused:1,explore:3,wild:6};             // variant count per creativity level
+function revisionRunLabel(c){
+  const n=CVAR[c]||1;
+  return n>1?("Run "+n+" variant revisions →"):"Run revision →";
+}
 /* deterministic gap-check → confirm-not-ask chips. Hard floor: always surface
    engine + units; flag an inferred size when the brief carried no numbers. */
 function renderGapChips(){
@@ -678,7 +687,7 @@ function renderGapChips(){
   const imperial=/inch|inches|"|feet|foot|\bft\b|'/.test(req);
   chips.push({t:imperial?"units · mm ← imperial":"units · mm", c:"cool"});
   if(!/\d/.test(req)) chips.push({t:"size inferred — confirm below", c:"warn"});
-  const holes=(sp.features||[]).reduce((n,f)=>n+(+f.count||0),0);
+  const holes=sp.engine==="stack" ? (sp.features||[]).reduce((n,f)=>n+(+f.count||0),0) : 0;
   if(holes) chips.push({t:holes+" hole"+(holes>1?"s":"")+" detected", c:""});
   box.innerHTML=chips.map(ch=>'<span class="gc '+ch.c+'">'+esc(ch.t)+'</span>').join("");
 }
@@ -757,6 +766,7 @@ function wireGate(){
       ? "Structural — grows minimal material along the load paths. Best when you gave a load, not a fixed shape."
       : "Parametric — an exact editable shape from a template. Best for plates, flanges, enclosures with precise faces.";
     $("#structOpts").style.display = e==="structural"?"":"none";
+    const fb=$("#featBlock"); if(fb) fb.style.display = e==="stack"?"":"none";
     const run=$("#gRun"); run.className="btn "+(e==="structural"?"warm":"");
     if(e==="structural") updateGateNotes(); else run.textContent="Run build →";
     renderGapChips(); drawStyleMap();      // dimming follows the engine
@@ -773,9 +783,9 @@ function wireGate(){
 async function runDraft(){
   const sp=S.session.spec;
   const bbox={}; for(const a of ["x","y","z"]){ const v=$("#gb_"+a).value; if(v!=="") bbox[a]=+v; }
-  const features=[...document.querySelectorAll("#gFeats .feat")].map(d=>{
+  const features=sp.engine==="stack" ? [...document.querySelectorAll("#gFeats .feat")].map(d=>{
     const o={}; d.querySelectorAll("input").forEach(i=>o[i.dataset.k]=i.value); return o;
-  }).filter(f=>f.diameter_mm&&f.count);
+  }).filter(f=>f.diameter_mm&&f.count) : [];
   const body={engine:sp.engine, bbox, features, objective:$("#gObj").value,
     quality:sp.quality, creativity:sp.creativity, style:sp.style};
   $("#gErr").textContent=""; $("#gRun").disabled=true;
@@ -795,7 +805,7 @@ function schematicSVG(sp){
   const W=260,H=150,pad=30; const sc=Math.min((W-2*pad)/(x+y*0.5),(H-2*pad)/(z+y*0.5));
   const dx=x*sc, dz=z*sc, dy=y*0.5*sc;
   const ox=pad, oy=H-pad-dy;
-  const holes=(sp.features||[]).reduce((n,f)=>n+(+f.count||0),0);
+  const holes=sp.engine==="stack" ? (sp.features||[]).reduce((n,f)=>n+(+f.count||0),0) : 0;
   let hc=""; const nh=Math.min(holes,8);
   for(let i=0;i<nh;i++){ const cx=ox+dx*((i+1)/(nh+1)), cy=oy-dz/2; hc+='<circle cx="'+cx.toFixed(0)+'" cy="'+cy.toFixed(0)+'" r="4" fill="#080b0f" stroke="'+(sp.engine==="structural"?"#ff8a5c":"#4fc3f7")+'" stroke-width="1.4"/>'; }
   const col=sp.engine==="structural"?"#ff8a5c":"#4fc3f7";
@@ -1522,8 +1532,8 @@ function metricsBlock(j,shown){
 }
 
 /* -------- recipe editor (LLM-free revision) -------- */
-const DIRS=[["[0,0,-1]","↓ pressing down"],["[0,0,1]","↑ pulling up"],
-  ["[1,0,0]","→ pushing +x"],["[-1,0,0]","← pushing −x"],["[0,1,0]","pushing +y"],["[0,-1,0]","pushing −y"]];
+const DIRS=[["[0,0,-1]","push down"],["[0,0,1]","pull up"],
+  ["[1,0,0]","push right"],["[-1,0,0]","push left"],["[0,1,0]","push back"],["[0,-1,0]","push front"]];
 function regionSentence(box){
   const ax=["x","y","z"],names=[];
   for(let i=0;i<3;i++){ const a=box[i],b=box[i+3];
@@ -1533,13 +1543,14 @@ function regionSentence(box){
     else if(a>0.02||b<0.98) names.push(ax[i]+" "+Math.round(a*100)+"–"+Math.round(b*100)+"%"); }
   return names.length?names.join(", "):"the whole body";
 }
-function box6(kind,idx,box){ const cells=["x0","x1","y0","y1","z0","z1"],order=[0,3,1,4,2,5];
-  return '<div class="box6">'+order.map((oi,k)=>'<label>'+cells[k]+
+function box6(kind,idx,box,mode){ const order=[0,3,1,4,2,5],
+  cells=mode==="range"?["x from","x to","y from","y to","z from","z to"]:["x0","x1","y0","y1","z0","z1"];
+  return '<div class="box6 '+(mode==="range"?"range":"")+'">'+order.map((oi,k)=>'<label>'+cells[k]+
     '<input type="number" min="0" max="100" value="'+Math.round(box[oi]*100)+'" data-r="'+kind+'-'+idx+'-'+oi+'"></label>').join("")+'</div>'; }
 /* direct manipulation: click a cube face to snap a support/load to canonical 0..1 box */
 const FACES=[["left","◧ left",[0,0,0,0.06,1,1]],["right","right ◨",[0.94,0,0,1,1,1]],
   ["front","front",[0,0,0,1,0.06,1]],["back","back",[0,0.94,0,1,1,1]],
-  ["bottom","▼ floor",[0,0,0,1,1,0.06]],["top","top ▲",[0,0,0.94,1,1,1]]];
+  ["bottom","▼ bottom",[0,0,0,1,1,0.06]],["top","top ▲",[0,0,0.94,1,1,1]]];
 function faceOf(box){ for(const f of FACES){ if(f[2].every((v,i)=>Math.abs(v-box[i])<0.02)) return f[0]; } return null; }
 function facePicker(kind,idx,box){
   const cur=faceOf(box);
@@ -1602,19 +1613,28 @@ function renderRecipe(j){
   let h='<h2 class="sh">Design recipe</h2><div class="hint" style="margin-bottom:8px">Edit the numbers, then run a revision — no LLM, ~seconds.</div><div class="rc">';
   if(S.styles&&S.styles.styles) h+='<div class="grp">Style — restyle & re-run (no LLM)</div><div id="rStyleMap"></div>';
   if(cfg.engine==="structural"){
+    const ckey=cfg.creativity||j.creativity||"focused";
     h+='<div class="rl"><span class="rk">design space</span><span class="rv">'+
        ["x","y","z"].map((a,i)=>'<input type="number" step="any" value="'+cfg.domain_mm[i]+'" data-r="dom-'+i+'">').join(" × ")+'</span></div>'+
        '<div class="rl"><span class="rk">keep material</span><span class="rv"><input type="number" min="10" max="60" value="'+Math.round(cfg.volfrac*100)+'" data-r="volfrac"> %</span></div>'+
        '<div class="rl"><span class="rk">quality</span><span class="rv"><select data-r="quality" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          ['draft','balanced','fine','ultra'].map(q=>'<option value="'+q+'"'+((cfg.quality||"draft")===q?" selected":"")+'>'+q+'</option>').join("")+'</select></span></div>'+
+       '<div class="rl"><span class="rk">creativity</span><span class="rv"><select data-r="creativity" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+         [['focused','Focused'],['explore','Explore'],['wild','Wild']].map(o=>'<option value="'+o[0]+'"'+(ckey===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
        '<div class="rl"><span class="rk">mesh detail</span><span class="rv"><select data-r="mesh_detail" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          [[1,'coarse'],[2,'smooth'],[3,'fine']].map(o=>'<option value="'+o[0]+'"'+((+cfg.mesh_detail||2)===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select> <span class="hint">surface only</span></span></div>'+
        (cfg.seed!=null?'<div class="rl"><span class="rk">seed</span><span class="rv">'+esc(cfg.seed)+(cfg.variant_label?" · "+esc(cfg.variant_label):"")+'</span></div>':'');
-    (cfg.supports||[]).forEach((s,i)=>{ h+='<div class="sen">🔒 <b style="color:var(--ink)">Fixed:</b> '+regionSentence(s.box)+'</div>'+facePicker("sup",i,s.box)+box6("sup",i,s.box); });
+    if((cfg.supports||[]).length) h+='<div class="grp">Anchored area <span class="hint" style="font-weight:400">— bolted, clamped, or touching ground</span></div>';
+    (cfg.supports||[]).forEach((s,i)=>{ h+='<div class="sen">🔒 <b style="color:var(--ink)">Held still:</b> '+regionSentence(s.box)+'</div>'+
+      '<div class="bcnote">This is where the part cannot move; loads must travel back to this area.</div>'+
+      facePicker("sup",i,s.box)+box6("sup",i,s.box,"range"); });
+    if((cfg.loads||[]).length) h+='<div class="grp">Force applied <span class="hint" style="font-weight:400">— where the part is pushed or pulled</span></div>';
     (cfg.loads||[]).forEach((l,i)=>{ const dv=JSON.stringify(l.dir.map(v=>Math.round(v*100)/100));
       const opts=DIRS.map(([v,lab])=>'<option value=\''+v+'\' '+(v===dv?"selected":"")+'>'+lab+'</option>').join("")+
         (DIRS.some(([v])=>v===dv)?"":'<option value=\''+dv+'\' selected>custom</option>');
-      h+='<div class="sen">⬇ <b style="color:var(--ink)">Load:</b> '+regionSentence(l.box)+' <select data-r="dir-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select></div>'+facePicker("load",i,l.box)+box6("load",i,l.box); });
+      h+='<div class="sen">⬇ <b style="color:var(--ink)">Force:</b> '+regionSentence(l.box)+' <select data-r="dir-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select></div>'+
+        '<div class="bcnote">This marks the contact patch for weight, pressure, pull, or impact.</div>'+
+        facePicker("load",i,l.box)+box6("load",i,l.box,"range"); });
     h+='<div class="grp">Keep regions <span class="hint" style="font-weight:400">— pin surfaces while the rest optimizes</span></div>'+
        '<div id="rRegions"></div>'+
        '<button type="button" class="ghost" id="rAddReg" style="margin-top:6px;font-size:11px;padding:4px 9px">+ add keep region</button>';
@@ -1628,10 +1648,12 @@ function renderRecipe(j){
       h+='<div class="expand" id="showAll" data-total="'+entries.length+'" style="margin-left:0;padding:7px 0">+ show all '+entries.length+' fields ▾</div>'+
          '<div id="fineGrp" style="display:none"><div class="grp">Fine control</div>'+fine.map(([k,v])=>paramRow(k,v,baseParams)).join("")+'</div>';
   }
-  h+='</div><button class="btn" id="dRev" style="margin-top:12px">Run revision →</button><div class="err" id="dRevErr"></div>';
+  h+='</div><button class="btn" id="dRev" style="margin-top:12px">'+(cfg.engine==="structural"?revisionRunLabel(cfg.creativity||j.creativity||"focused"):"Run revision →")+'</button><div class="err" id="dRevErr"></div>';
   wrap.innerHTML=h;
   $("#dRev").onclick=runRevision;
   wireFaces();
+  const cr=$('[data-r="creativity"]');
+  if(cr) cr.onchange=()=>{ $("#dRev").textContent=revisionRunLabel(cr.value); };
   if(cfg.engine==="structural"){                         // Phase 2 keep-regions live list
     S.editRegions=(cfg.regions||[]).map(r=>{ const o={box:(r.box||[0.94,0,0,1,1,1]).slice(),rule:r.rule};
       if(r.tris&&r.tris.length) o.tris=r.tris.map(t=>t.slice()); return o; });
@@ -1650,6 +1672,7 @@ async function runRevision(){
   if(cfg.engine==="structural"){
     cfg.domain_mm=[0,1,2].map(i=>+g("dom-"+i).value); cfg.volfrac=+g("volfrac").value/100;
     const qs=g("quality"); if(qs) cfg.quality=qs.value;
+    const cs=g("creativity"); if(cs) cfg.creativity=cs.value;
     const mds=g("mesh_detail"); if(mds) cfg.mesh_detail=+mds.value;
     (cfg.supports||[]).forEach((s,i)=>{for(let o=0;o<6;o++){const e=g("sup-"+i+"-"+o); if(e)s.box[o]=+e.value/100;}});
     (cfg.loads||[]).forEach((l,i)=>{for(let o=0;o<6;o++){const e=g("load-"+i+"-"+o); if(e)l.box[o]=+e.value/100;} l.dir=JSON.parse(g("dir-"+i).value);});

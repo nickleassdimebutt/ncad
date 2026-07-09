@@ -1,4 +1,4 @@
-# genloop template: open-top enclosure shell — outer box minus cavity,
+# nCAD template: open-top enclosure shell — outer box minus cavity,
 # optional outer corner fillets and floor bolt-circle holes.
 outer_x = 100.0
 outer_y = 60.0
