@@ -1143,6 +1143,19 @@ def clamp_params(tname, params):
     return out
 
 
+TEMPLATE_ALIASES = {
+    "sphere": "sphere_solid",
+    "ball": "sphere_solid",
+    "orb": "sphere_solid",
+}
+
+
+def normalize_template_name(tname):
+    if not isinstance(tname, str):
+        return tname
+    return TEMPLATE_ALIASES.get(tname.strip().lower(), tname)
+
+
 def heuristic_config(job):
     """Deterministic fallback configurator — the stack still works with no
     LLM at all: pick a template by brief keywords, derive params from spec."""
@@ -1153,8 +1166,13 @@ def heuristic_config(job):
 
     bbox = job["bbox"]
     square_xy = "x" in bbox and "y" in bbox and abs(bbox["x"] - bbox["y"]) < 0.01
-    if has("enclosure", "box", "case", "housing", "shell", "tray", "bin"):
+    cubic = {"x", "y", "z"} <= set(bbox) and max(bbox.values()) - min(bbox.values()) < 0.01
+    if has("sphere", "spherical", "ball", "orb"):
+        tname = "sphere_solid"
+    elif has("enclosure", "box", "case", "housing", "shell", "tray", "bin"):
         tname = "box_enclosure"
+    elif has("round", "circular") and cubic:
+        tname = "sphere_solid"
     elif has("flange", "disc", "disk", "hub", "washer") or \
             (has("round", "circular", "cylindrical") and square_xy):
         tname = "flange_disc"
@@ -1202,6 +1220,7 @@ def llm_config(job, feedback=None):
         *([f"PREVIOUS CONFIGURATION FAILED: {feedback}"] if feedback else []),
         "",
         'Pick the best template and set its parameters so every requirement passes.',
+        'Use sphere_solid for a solid sphere, ball, or orb.',
         'Set bbox-mapped params exactly to the bbox targets. Use plausible engineering',
         'values for anything the brief implies (e.g. bolt circle diameter between bore and rim).',
         'Reply with ONLY this JSON, nothing else:',
@@ -1215,7 +1234,7 @@ def llm_config(job, feedback=None):
         m = re.search(r"\{.*\}", text, re.S)
         try:
             cfg = json.loads(m.group()) if m else {}
-            tname = cfg.get("template")
+            tname = normalize_template_name(cfg.get("template"))
             if tname not in TEMPLATES:
                 raise ValueError(f"unknown template {tname!r} in reply: {text[:120]!r}")
             return tname, clamp_params(tname, cfg.get("params")), model

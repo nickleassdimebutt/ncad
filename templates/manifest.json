@@ -1,4 +1,11 @@
 {
+  "sphere_solid": {
+    "description": "Solid sphere/ball/orb with a single diameter parameter.",
+    "bbox_map": { "x": "diameter", "y": "diameter", "z": "diameter" },
+    "params": {
+      "diameter": { "default": 50, "min": 1, "max": 500 }
+    }
+  },
   "plate_holes": {
     "description": "Rectangular plate with optional corner fillets, an optional center bore, and one hole pattern (polar bolt-circle or rectangular grid).",
     "bbox_map": { "x": "length", "y": "width", "z": "thickness" },
