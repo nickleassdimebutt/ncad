@@ -28,8 +28,6 @@
   .brand{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.14em;color:var(--dim);
          display:flex;align-items:baseline;gap:12px;min-width:0}
   .brand .n{color:var(--cool)} .brand b{color:var(--ink)}
-  .brand .tag{font-weight:400;font-size:12px;letter-spacing:0;color:var(--warm);
-              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .26s}
   .gpu{font-family:var(--mono);font-size:11.5px;color:var(--faint);display:flex;align-items:center;gap:9px;flex:none}
   .gpu .lbl{letter-spacing:.14em}
   .gpu .bar{width:44px;height:7px;border-radius:2px;background:var(--line);overflow:hidden;position:relative}
@@ -199,19 +197,47 @@
   .viewport .callouts .lbl{fill:#ffe680;font:600 12px var(--mono);paint-order:stroke;stroke:#0a0d12;stroke-width:3px;stroke-linejoin:round}
   .viewport .callouts .lbu{fill:#9aa4bf;font:500 9px var(--mono);paint-order:stroke;stroke:#0a0d12;stroke-width:3px}
   /* Phase 1: hand-rolled WebGL STL viewer (offline, no deps) — takes over the viewport when on */
-  .viewport .glview{position:absolute;inset:0;width:100%;height:100%;display:none;touch-action:none;cursor:grab;background:#080b0f}
-  .viewport .glview:active{cursor:grabbing}
-  .viewport.gl-on .glview{display:block}
-  .viewport.gl-on .vlayer,.viewport.gl-on .callouts,.viewport.gl-on .cmp,.viewport.gl-on .wash{display:none!important}
+  .viewport .glview{position:absolute;inset:0;width:100%;height:100%;display:none;touch-action:none;
+    pointer-events:none;cursor:default;background:#080b0f}
+  .viewport.gl-visible .glview{display:block}
+  .viewport.gl-interactive .glview{pointer-events:auto;cursor:grab}
+  .viewport.gl-interactive .glview:active{cursor:grabbing}
+  .viewport.gl-visible .vlayer,.viewport.gl-visible .callouts,.viewport.gl-visible .cmp,.viewport.gl-visible .wash{display:none!important}
   .viewport .glhint{position:absolute;left:10px;bottom:9px;font-family:var(--mono);font-size:10px;color:var(--dim);pointer-events:none;display:none}
-  .viewport.gl-on .glhint{display:block}
+  .viewport.gl-interactive .glhint{display:block}
   .viewport .picktools{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:4px;align-items:center;
-    background:rgba(8,11,15,.72);border:1px solid var(--line2);border-radius:8px;padding:4px 6px;z-index:4}
+    max-width:calc(100% - 20px);flex-wrap:wrap;justify-content:center;background:rgba(8,11,15,.82);border:1px solid var(--line2);border-radius:8px;padding:4px 6px;z-index:4}
   .viewport .picktools .pl{font-family:var(--mono);font-size:10px;color:var(--dim);padding:0 4px}
   .viewport .picktools button{background:var(--raise);border:1px solid var(--line2);color:var(--dim);
     font-size:11px;padding:3px 8px;border-radius:6px;cursor:pointer}
   .viewport .picktools button.on{background:var(--warm);color:#20120b;border-color:var(--warm)}
   .viewport .picktools button:hover{border-color:var(--warm)}
+  .viewport .picktools .loadvec{display:flex;align-items:center;gap:3px;border-left:1px solid var(--line2);padding-left:6px}
+  .viewport .picktools .loadvec input{width:43px;background:#080b0f;border:1px solid var(--line2);border-radius:4px;
+    color:var(--ink);font:10px var(--mono);padding:3px 4px}
+  .viewport .picktools .retainops{display:flex;align-items:center;gap:3px;border-left:1px solid var(--line2);padding-left:6px}
+  .viewport .picktools .retainops button.on{background:rgba(79,195,247,.18);color:var(--ink);border-color:var(--cool)}
+  .selectshape{position:absolute;display:none;border:1.5px dashed var(--cool);background:rgba(79,195,247,.10);
+    pointer-events:none;z-index:5;box-shadow:0 0 0 1px rgba(8,11,15,.7)}
+  .selectshape.circle{border-radius:50%}
+  .selectshape.remove{border-color:var(--bad);background:rgba(255,90,90,.09)}
+  .viewctl{position:absolute;right:12px;top:10px;width:146px;padding:6px;background:rgba(8,11,15,.88);
+    border:1px solid var(--line2);border-radius:9px;z-index:5;display:none;box-shadow:0 5px 20px rgba(0,0,0,.25)}
+  .viewport.gl-interactive .viewctl{display:block}
+  .viewctl .vtitle{display:flex;justify-content:space-between;align-items:center;color:var(--faint);
+    font:9px var(--mono);letter-spacing:.12em;text-transform:uppercase;margin:0 2px 5px}
+  .viewctl .vgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
+  .viewctl button{background:var(--raise);border:1px solid var(--line2);border-radius:5px;color:var(--dim);
+    font:9.5px var(--mono);padding:5px 2px;cursor:pointer}
+  .viewctl button:hover,.viewctl button.on{border-color:var(--cool);color:var(--ink);background:rgba(79,195,247,.13)}
+  .axis-tag{font:700 10px var(--mono);margin-left:2px}.axis-x{color:#ff6b6b}.axis-y{color:#63d471}.axis-z{color:#4fc3f7}
+  .vecmeaning{font:10px var(--mono);color:var(--ink);white-space:nowrap;padding:0 4px}
+  .axisgizmo{position:absolute;right:12px;bottom:10px;width:94px;height:94px;z-index:3;display:none;
+    background:rgba(8,11,15,.68);border:1px solid var(--line2);border-radius:9px;pointer-events:none}
+  .viewport.gl-interactive .axisgizmo{display:block}
+  .axisgizmo line{stroke-width:2.2;stroke-linecap:round}.axisgizmo .neg{stroke-width:1;opacity:.3}
+  .axisgizmo text{font:700 10px var(--mono);paint-order:stroke;stroke:#080b0f;stroke-width:3px}
+  .axisgizmo .origin{fill:#dbe6f3}.axisgizmo .caption{fill:var(--dim);font:8px var(--mono);stroke-width:2px}
   /* revision compare: structural = draggable wipe (fixed camera registers), parametric = side-by-side */
   .cmp{position:absolute;inset:0}
   .cmp img.cmp-base,.cmp img.cmp-cur{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
@@ -271,6 +297,49 @@
   .rc .box6 input{width:48px}
   .rc .sen{font-size:11.5px;color:var(--dim);margin:8px 0 2px}
   .rc .bcnote{font-size:10.5px;color:var(--faint);line-height:1.35;margin:0 0 4px}
+  .materialwarn{margin:6px 0 2px;padding:7px 8px;border:1px solid rgba(255,159,67,.45);
+    border-radius:6px;background:rgba(255,159,67,.08);color:var(--warn);font-size:10.5px;line-height:1.4}
+  .materialwarn button{margin-left:5px;padding:2px 7px;font-size:10.5px}
+  .texture-preview{height:38px;margin:5px 0;border:1px solid var(--line2);border-radius:6px;
+    background-color:#263746;background-size:18px 18px;position:relative;overflow:hidden}
+  .texture-preview::after{content:"";position:absolute;inset:-80%;background-color:inherit;
+    background-image:inherit;background-size:inherit;background-position:center;
+    transform:rotate(var(--texture-angle,0deg));transform-origin:center}
+  .texture-preview[data-pattern="honeycomb"]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='28' viewBox='0 0 48 28'%3E%3Crect width='48' height='28' fill='%23263746'/%3E%3Cg fill='none' stroke='%237898af' stroke-width='2'%3E%3Cpath d='M12 1 24 7 24 21 12 27 0 21 0 7Z'/%3E%3Cpath d='M36 1 48 7 48 21 36 27 24 21 24 7Z'/%3E%3C/g%3E%3C/svg%3E");background-size:48px 28px}
+  .texture-preview[data-pattern="diamond"]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='24'%3E%3Crect width='32' height='24' fill='%23263746'/%3E%3Cpath d='M8 1 15 12 8 23 1 12ZM24 1 31 12 24 23 17 12Z' fill='%237fa0b8'/%3E%3C/svg%3E");background-size:32px 24px}
+  .texture-preview[data-pattern="ribs"]{background-image:repeating-linear-gradient(90deg,#263746 0 7px,#7898af 7px 10px,#263746 10px 18px)}
+  .texture-preview[data-pattern="dimples"]{background-image:radial-gradient(circle,#1a2833 0 3px,#7797ae 4px,transparent 6px)}
+  .texture-preview[data-pattern="waves"]{background-image:repeating-radial-gradient(ellipse at 0 50%,transparent 0 8px,#7898af 9px 11px,transparent 12px 18px);background-size:36px 18px}
+  .texture-preview[data-pattern="pebbled"]{background-image:radial-gradient(circle at 25% 30%,#83a2b8 0 2px,transparent 4px),radial-gradient(circle at 70% 65%,#182631 0 3px,transparent 5px);background-size:17px 15px,23px 19px}
+  .texture-preview[data-pattern="checker"]{background-image:conic-gradient(#7898af 25%,#263746 0 50%,#7898af 0 75%,#263746 0)}
+  .texture-preview[data-pattern="chevron"]{background-image:linear-gradient(135deg,transparent 42%,#7898af 43% 56%,transparent 57%),linear-gradient(45deg,transparent 42%,#7898af 43% 56%,transparent 57%);background-size:24px 12px}
+  .texture-preview[data-pattern="crosshatch"]{background-image:repeating-linear-gradient(45deg,transparent 0 8px,#7898af 8px 10px),repeating-linear-gradient(-45deg,transparent 0 8px,#7898af 8px 10px)}
+  .texture-preview[data-pattern="basket"]{background-image:linear-gradient(90deg,#7898af 50%,transparent 0),linear-gradient(#526d81 50%,transparent 0);background-size:22px 11px,11px 22px}
+  .texture-preview[data-pattern="brick"]{background-image:linear-gradient(#7898af 2px,transparent 2px),linear-gradient(90deg,#7898af 2px,transparent 2px);background-size:28px 12px,28px 12px}
+  .texture-preview[data-pattern="scales"]{background-image:radial-gradient(circle at 50% 0,transparent 7px,#7898af 8px 10px,transparent 11px);background-size:22px 13px}
+  .texture-preview[data-pattern="rings"]{background-image:repeating-radial-gradient(circle at center,#7898af 0 2px,transparent 3px 8px)}
+  .texture-preview[data-pattern="starburst"]{background-image:repeating-conic-gradient(from 5deg,#7898af 0 5deg,transparent 5deg 15deg);background-size:42px 42px}
+  .texture-preview[data-pattern="grid"]{background-image:linear-gradient(#7898af 2px,transparent 2px),linear-gradient(90deg,#7898af 2px,transparent 2px)}
+  .texture-preview[data-pattern="triangles"]{background-image:conic-gradient(from 30deg at 25% 75%,transparent 60deg,#7898af 0 120deg,transparent 0);background-size:22px 19px}
+  .texture-preview[data-pattern="woodgrain"]{background-image:repeating-radial-gradient(ellipse at 15% 50%,transparent 0 5px,#7898af 6px 7px,transparent 8px 13px);background-size:44px 22px}
+  .texture-preview[data-pattern="stipple"]{background-image:radial-gradient(circle,#7898af 0 2px,transparent 3px);background-size:9px 9px}
+  .texture-preview[data-pattern="voronoi"]{background-image:repeating-conic-gradient(from 17deg at 35% 40%,#7898af 0 3deg,transparent 4deg 38deg);background-size:31px 27px}
+  .texture-preview[data-pattern="topo"]{background-image:repeating-radial-gradient(ellipse at 30% 60%,transparent 0 5px,#7898af 6px 7px,transparent 8px 13px);background-size:43px 29px}
+  .texture-preview[data-pattern="herringbone"]{background-image:linear-gradient(135deg,transparent 43%,#7898af 44% 56%,transparent 57%),linear-gradient(45deg,transparent 43%,#526d81 44% 56%,transparent 57%);background-size:28px 14px}
+  .texture-preview[data-pattern="tread"]{background-image:linear-gradient(135deg,transparent 35%,#7898af 36% 64%,transparent 65%),linear-gradient(45deg,transparent 35%,#7898af 36% 64%,transparent 65%);background-size:34px 17px}
+  .texture-preview[data-pattern="carbon"]{background-image:linear-gradient(45deg,#7898af 25%,#263746 25% 50%,#526d81 50% 75%,#1b2934 75%);background-size:16px 16px}
+  .texture-preview[data-pattern="hammered"]{background-image:radial-gradient(ellipse at 25% 35%,#7898af 0 3px,#263746 7px),radial-gradient(ellipse at 70% 65%,#526d81 0 4px,transparent 8px);background-size:23px 19px,31px 27px}
+  .texture-preview[data-pattern="leather"]{background-image:repeating-radial-gradient(ellipse at 35% 65%,#263746 0 3px,#7898af 4px 5px,#263746 7px 11px);background-size:29px 21px}
+  .texture-preview[data-pattern="bark"]{background-image:repeating-linear-gradient(87deg,#263746 0 3px,#7898af 5px 7px,#263746 10px 15px);background-size:23px 100%}
+  .texture-preview[data-pattern="sandstone"]{background-image:radial-gradient(circle at 20% 30%,#7898af 0 1px,transparent 2px),radial-gradient(circle at 70% 60%,#526d81 0 1px,transparent 2px);background-size:7px 9px,11px 8px}
+  .texture-preview[data-pattern="droplets"]{background-image:radial-gradient(circle at 35% 35%,#7898af 0 4px,#526d81 5px,transparent 7px);background-size:25px 22px}
+  .texture-preview[data-pattern="guilloche"]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='24'%3E%3Crect width='48' height='24' fill='%23263746'/%3E%3Cg fill='none' stroke='%237898af' stroke-width='1.5'%3E%3Cpath d='M0 6C8 0 16 12 24 6S40 12 48 6'/%3E%3Cpath d='M0 6C8 12 16 0 24 6S40 0 48 6'/%3E%3Cpath d='M0 18C8 12 16 24 24 18S40 24 48 18'/%3E%3Cpath d='M0 18C8 24 16 12 24 18S40 12 48 18'/%3E%3C/g%3E%3C/svg%3E");background-size:48px 24px}
+  .texture-preview[data-pattern="circuit"]{background-image:linear-gradient(#7898af 2px,transparent 2px),linear-gradient(90deg,#526d81 2px,transparent 2px),radial-gradient(circle,#9ab5c8 0 3px,transparent 4px);background-size:30px 16px,22px 27px,30px 27px}
+  .texture-preview[data-pattern="leopard"]{background-color:#e8e1d2;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='60' viewBox='0 0 240 60'%3E%3Cg fill='%23263746'%3E%3Cpath d='M1 4C7-1 14 2 13 8C12 13 5 14 2 10Z'/%3E%3Cpath d='M19 1C25 0 28 5 25 10C22 14 16 11 17 6Z'/%3E%3Cpath d='M34 5C39 0 47 2 48 8C49 14 41 17 36 13C32 11 31 8 34 5Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5c-2 0-3 1-3 2Z' fill-rule='evenodd'/%3E%3Cpath d='M56 0C62-1 67 3 65 8C63 13 55 12 53 7Z'/%3E%3Cpath d='M74 4C79 0 87 3 86 10C85 15 77 17 73 12C70 9 71 6 74 4Zm4 4c0 2 2 3 4 1c1-2-1-4-3-3Z' fill-rule='evenodd'/%3E%3Cpath d='M94 1C100-1 106 3 104 9C102 14 94 13 91 8Z'/%3E%3Cpath d='M113 5C117 0 125 1 128 6C130 11 124 16 118 14C112 13 109 9 113 5Z'/%3E%3Cpath d='M136 1C142-1 148 3 146 8C145 13 138 14 134 10Z'/%3E%3Cpath d='M154 5C158 0 167 2 168 8C169 14 162 17 157 14C152 12 151 8 154 5Zm5 3c-1 2 1 4 3 3c3-1 2-4 0-5c-1 0-3 1-3 2Z' fill-rule='evenodd'/%3E%3Cpath d='M177 0C184-1 188 4 185 9C182 14 175 12 174 7Z'/%3E%3Cpath d='M195 4C201 0 208 3 208 9C208 15 200 17 195 13C191 10 191 7 195 4Zm5 3c-2 2 0 5 3 4c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M217 1C223-1 230 2 229 8C228 13 221 14 217 11C213 8 214 4 217 1Z'/%3E%3Cpath d='M235 5C239 2 243 4 244 9C243 14 237 15 233 12Z'/%3E%3Cpath d='M5 20C10 15 18 18 18 24C18 30 10 32 5 28C1 26 1 22 5 20Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M27 16C33 14 38 19 36 24C34 29 27 29 23 24Z'/%3E%3Cpath d='M45 21C50 16 57 18 59 24C60 30 53 34 47 31C42 29 41 24 45 21Z'/%3E%3Cpath d='M68 16C74 14 80 18 78 24C76 29 68 29 65 24Z'/%3E%3Cpath d='M87 20C92 15 100 18 100 24C100 30 92 33 87 29C83 27 83 23 87 20Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M109 16C115 14 121 18 119 24C117 29 110 30 106 25Z'/%3E%3Cpath d='M128 21C133 16 141 18 142 24C143 30 135 34 130 31C125 29 124 24 128 21Z'/%3E%3Cpath d='M151 16C157 14 163 18 161 24C159 29 152 30 148 25Z'/%3E%3Cpath d='M170 20C175 15 183 18 183 24C183 30 176 33 171 30C166 28 166 23 170 20Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M192 16C198 14 204 18 202 24C200 29 193 30 189 25Z'/%3E%3Cpath d='M211 21C216 16 224 18 225 24C226 30 218 34 213 31C208 29 207 24 211 21Z'/%3E%3Cpath d='M234 16C240 14 244 19 242 25C240 29 234 29 231 25Z'/%3E%3Cpath d='M0 38C5 33 13 35 14 42C15 48 7 51 2 47Z'/%3E%3Cpath d='M22 34C28 32 34 36 32 42C30 47 23 48 19 43Z'/%3E%3Cpath d='M41 39C46 34 54 36 55 42C56 48 48 52 43 49C38 47 37 42 41 39Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M64 34C70 32 76 36 74 42C72 47 65 48 61 43Z'/%3E%3Cpath d='M83 38C88 33 96 35 97 42C98 48 90 51 85 48Z'/%3E%3Cpath d='M105 34C111 32 117 36 115 42C113 47 106 48 102 43Z'/%3E%3Cpath d='M124 39C129 34 137 36 138 42C139 48 131 52 126 49C121 47 120 42 124 39Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M147 34C153 32 159 36 157 42C155 47 148 48 144 43Z'/%3E%3Cpath d='M166 38C171 33 179 35 180 42C181 48 173 51 168 48Z'/%3E%3Cpath d='M188 34C194 32 200 36 198 42C196 47 189 48 185 43Z'/%3E%3Cpath d='M207 39C212 34 220 36 221 42C222 48 214 52 209 49C204 47 203 42 207 39Zm5 3c-1 2 1 4 3 3c2-1 2-4 0-5Z' fill-rule='evenodd'/%3E%3Cpath d='M230 34C236 32 242 36 240 42C238 47 231 48 227 43Z'/%3E%3Cpath d='M9 54C14 49 22 51 23 58C24 62 16 64 11 61Z'/%3E%3Cpath d='M32 50C38 48 44 52 42 58C40 62 33 63 29 59Z'/%3E%3Cpath d='M51 55C56 50 64 52 65 58C66 62 58 64 53 61Z'/%3E%3Cpath d='M74 50C80 48 86 52 84 58C82 62 75 63 71 59Z'/%3E%3Cpath d='M93 55C98 50 106 52 107 58C108 62 100 64 95 61Z'/%3E%3Cpath d='M116 50C122 48 128 52 126 58C124 62 117 63 113 59Z'/%3E%3Cpath d='M135 55C140 50 148 52 149 58C150 62 142 64 137 61Z'/%3E%3Cpath d='M158 50C164 48 170 52 168 58C166 62 159 63 155 59Z'/%3E%3Cpath d='M177 55C182 50 190 52 191 58C192 62 184 64 179 61Z'/%3E%3Cpath d='M200 50C206 48 212 52 210 58C208 62 201 63 197 59Z'/%3E%3Cpath d='M219 55C224 50 232 52 233 58C234 62 226 64 221 61Z'/%3E%3C/g%3E%3C/svg%3E");background-size:240px 60px}
+  .reglist{margin-top:5px;border:1px solid var(--line);border-radius:6px;padding:4px 7px}
+  .reglist summary{cursor:pointer;color:var(--dim);font:10.5px var(--mono);padding:2px 0}
+  .rc .vec3{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);color:var(--ink)}
+  .rc .vec3 input{width:44px}
   .rc .regx{float:right;background:none;border:none;color:var(--bad);cursor:pointer;font-size:11px;padding:0 2px;line-height:1}
   .rc .regx:hover{color:#ff6b6b}
   /* structural face-picker: click a cube face to snap a support/load region */
@@ -295,7 +364,7 @@
 </head>
 <body>
   <div class="hdr">
-    <div class="brand"><span class="n">n</span><b>CAD</b><span class="tag" id="tag">a bench you never leave.</span></div>
+    <div class="brand"><span class="n">n</span><b>CAD</b></div>
     <div class="gpu idle" id="gpu"><span class="lbl">GPU</span><span class="bar"><i></i></span><span class="who">idle</span></div>
   </div>
   <div class="shell">
@@ -306,6 +375,7 @@
       <div class="tidypanel" id="tidypanel" style="display:none"></div>
       <button class="newbtn" id="newbtn">+ New part</button>
       <button class="newbtn" id="uplbtn" style="margin-top:0">⤒ Upload part → redesign</button>
+      <button class="newbtn" id="settingsbtn" style="margin-top:0">⚙ AI settings</button>
       <input type="file" id="uplfile" accept=".stl,.step,.stp" style="display:none">
     </aside>
     <main class="stage" id="stage"></main>
@@ -326,10 +396,10 @@ const STAGE_TEXT = { configuring:"configuring the design…", generating:"writin
   building:"building the STEP…", verifying:"measuring against your spec…",
   optimizing:"evolving the structure…", queued:"waiting for the GPU…" };
 
-const S = { jobs:[], status:{active:null,queue:[],now:0}, statusAt:0,
+  const S = { jobs:[], status:{active:null,queue:[],now:0}, statusAt:0,
   sel:null, selIter:null, session:null, mode:"empty",
   expanded:{}, stageKind:null, stageJob:null, dockKey:null, film:{}, play:null, vfront:"A", compare:false,
-  dims:false, maps:{}, gl3d:false, styles:null };
+  dims:false, maps:{}, gl3d:false, styles:null, regionHistory:[], retainOp:"add", textureView:"iso" };
 /* aesthetic style presets (loaded once) + lookup for the job's chosen style */
 async function loadStyles(){ try{ const r=await fetch("/api/styles"); S.styles=await r.json(); }catch(e){} }
 function styleKey(j){ return (j&&j.config&&j.config.style)||(j&&j.style)||null; }
@@ -539,8 +609,13 @@ function revDiff(a,b){
 /* ---------------- selection + mode ---------------- */
 function selectJob(id){ S.sel=id; S.selIter=null; S.session=null; S.mode="job"; S.compare=false; stopPlay(); renderMain(true); }
 $("#newbtn").onclick = ()=>{ S.sel=null; S.selIter=null; S.session=null; S.mode="new"; renderMain(true); };
-/* Phase 3: upload a part → the solver redesigns inside its envelope (default cantilever
-   load case; refine supports/loads + keep-regions in the recipe, then re-run). */
+$("#settingsbtn").onclick = ()=>{
+  if(S.mode!=="settings") S.settingsReturn={mode:S.mode,sel:S.sel};
+  S.mode="settings"; renderMain(true);
+};
+/* Phase 3: upload a part → unchanged 100%-material baseline from its source mesh.
+   The cantilever load case is provisional; topology begins only on a revision after the
+   real supports/loads/keep-regions and a lower material budget have been chosen. */
 $("#uplbtn").onclick = ()=>$("#uplfile").click();
 $("#uplfile").onchange = async (e)=>{
   const f=e.target.files[0]; if(!f) return; e.target.value="";
@@ -572,7 +647,9 @@ function renderStage(kind, force){
   const jid = kind==="job" ? S.sel : null;
   const remount = force || S.stageKind!==kind || (kind==="job" && S.stageJob!==jid);
   if(kind==="new"){ if(remount){ mountNew(); S.stageKind="new"; S.stageJob=null; } return; }
+  if(kind==="settings"){ if(remount){ mountSettings(); S.stageKind="settings"; S.stageJob=null; } return; }
   if(kind==="drafting"||kind==="draft"){ if(remount) mountGate(); S.stageKind=kind; return; }
+  if(kind==="clarify"){ if(remount) mountClarify(); S.stageKind=kind; return; }
   if(kind==="empty"){ stage.innerHTML='<div class="empty">No parts yet.<br>Hit <b style="color:var(--cool)">+ New part</b> to describe one.</div>'; S.stageKind="empty"; return; }
   // job
   const j = selected();
@@ -580,11 +657,72 @@ function renderStage(kind, force){
   updateJob(j);
 }
 
+async function mountSettings(){
+  const stage=$("#stage");
+  stage.innerHTML='<div class="card"><h1>AI settings</h1><div class="sub">Loading Gemini Search configuration…</div><div class="skel" style="margin-top:18px"></div></div>';
+  try{
+    const r=await fetch("/api/settings/gemini"), cfg=await r.json();
+    if(!r.ok) throw new Error(cfg.error||"could not load settings");
+    renderGeminiSettings(cfg);
+  }catch(e){
+    stage.innerHTML='<div class="card"><h1>AI settings</h1><div class="err">'+esc(e.message)+'</div><button class="ghost" id="setBack">← back</button></div>';
+    $("#setBack").onclick=closeSettings;
+  }
+}
+
+function closeSettings(){
+  const ret=S.settingsReturn||{};
+  S.mode=ret.mode||((ret.sel&&job(ret.sel))?"job":"empty");
+  S.sel=ret.sel||S.sel; S.settingsReturn=null; renderMain(true);
+}
+
+function renderGeminiSettings(cfg, notice){
+  const managed=cfg.source==="environment", saved=cfg.source==="local_file";
+  const source=managed?"configured by environment":saved?"saved on this device":"not configured";
+  $("#stage").innerHTML='<div class="card"><h1>Gemini Search</h1>'+
+    '<div class="sub">Add your own Gemini API key to research exact hardware references before nCAD drafts geometry. nCAD tries Google Search grounding first; if the API project has no search quota, it uses Gemini’s technical knowledge and labels the result as ungrounded. nCAD never ships with or hardcodes a key.</div>'+
+    '<div class="gaterow"><span class="gk">Status</span><span>'+(cfg.configured?"Enabled":"Disabled")+' · '+esc(source)+'</span></div>'+
+    '<div class="gaterow"><span class="gk">Model</span><span>'+esc(cfg.model||"")+'</span></div>'+
+    '<label class="fl">'+(saved?"Replace API key":"Gemini API key")+'</label>'+
+    '<input id="setGeminiKey" type="password" autocomplete="off" '+(managed?"disabled ":"")+
+      'placeholder="'+(managed?"Managed by NCAD_GEMINI_API_KEY":"Paste your key; the current key is never displayed")+'">'+
+    '<div class="hint" style="margin-top:8px">Stored outside the nCAD project in your operating system’s user configuration directory. The settings API reports only whether a key exists, never the key itself. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--cool)">Get a key from Google AI Studio ↗</a></div>'+
+    (managed?'<div class="hint" style="margin-top:8px">This installation supplies the key through its environment, so it must be changed by the installer or administrator.</div>':'')+
+    '<div style="display:flex;gap:12px;margin-top:18px"><button class="ghost" id="setBack">← back</button>'+
+      (saved?'<button class="ghost" id="setRemove">Remove saved key</button>':'')+
+      '<button class="btn" id="setSave" style="flex:1" '+(managed?"disabled":"")+'>'+(saved?"Replace key":"Save key")+'</button></div>'+
+    '<div class="err" id="setErr">'+esc(notice||"")+'</div></div>';
+  $("#setBack").onclick=closeSettings;
+  if($("#setRemove")) $("#setRemove").onclick=removeGeminiKey;
+  $("#setSave").onclick=saveGeminiKey;
+}
+
+async function saveGeminiKey(){
+  const input=$("#setGeminiKey"), key=input.value.trim(), err=$("#setErr");
+  if(!key){ err.textContent="Paste a Gemini API key first."; return; }
+  err.textContent="Saving…";
+  try{
+    const r=await fetch("/api/settings/gemini",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({api_key:key})});
+    const cfg=await r.json(); if(!r.ok) throw new Error(cfg.error||"could not save key");
+    renderGeminiSettings(cfg,"Key saved. nCAD can now use grounded hardware search.");
+  }catch(e){ err.textContent=e.message; }
+}
+
+async function removeGeminiKey(){
+  if(!confirm("Remove the Gemini API key saved on this device?")) return;
+  const err=$("#setErr"); err.textContent="Removing…";
+  try{
+    const r=await fetch("/api/settings/gemini",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({remove:true})});
+    const cfg=await r.json(); if(!r.ok) throw new Error(cfg.error||"could not remove key");
+    renderGeminiSettings(cfg,"Saved key removed.");
+  }catch(e){ err.textContent=e.message; }
+}
+
 function mountNew(){
   S.stageKind="new"; stopPlay();
   $("#stage").innerHTML = '<div class="card">'+
     '<h1>Describe the part</h1>'+
-    '<div class="sub">Plain English — sizes in any units, loads, what it mounts to, what matters. The local model drafts a spec; you confirm before it runs.</div>'+
+    '<div class="sub">Plain English — sizes in any units, loads, what it mounts to, what matters. Name exact hardware and revision when applicable; Gemini Search can research its mechanical reference before the local model drafts a spec.</div>'+
     '<label class="fl">Project name</label><input id="nName" placeholder="shelf-bracket">'+
     '<label class="fl">What do you want?</label>'+
     '<textarea id="nReq" placeholder="A shelf bracket that holds 300 lb. Screw holes to bolt it to a wall. Protrudes only 3&quot; from the wall, no more than 4&quot; tall. Low mass, easy to 3D print."></textarea>'+
@@ -607,9 +745,51 @@ async function startDraft(){
     S.session.id = j.id;
     const r2 = await fetch("/api/sessions/"+j.id+"/answers",{method:"POST",
       headers:{"Content-Type":"application/json"},body:JSON.stringify({answers:{}})});
-    const j2 = await r2.json(); if(!r2.ok) throw new Error(j2.error);
+    const j2 = await r2.json();
+    if(j2.needs_clarification){ S.session.questions=j2.questions||[]; S.session.failure=j2.reason||"A few details are needed.";
+      S.session.geminiSetupRequired=!!j2.gemini_setup_required;
+      S.session.answers={}; S.mode="clarify"; renderMain(true); return; }
+    if(!r2.ok) throw new Error(j2.error);
     S.session.spec = j2.spec; S.mode="draft"; renderMain(true);
   }catch(e){ S.mode="new"; mountNew(); $("#nErr").textContent = "Draft failed: "+e.message; }
+}
+
+function mountClarify(){
+  const stage=$("#stage"), s=S.session, qs=(s&&s.questions)||[];
+  stage.innerHTML='<div class="card clarify"><h1>A few details will unblock the draft</h1>'+
+    '<div class="sub">'+esc(s.failure||"The local model could not produce a usable spec. Your original request is preserved.")+'</div>'+
+    (s.geminiSetupRequired?'<div class="hint" style="margin:14px 0">To let nCAD research exact hardware without a terminal, paste a Gemini API key here. It is stored only on this Mac with owner-only file permissions. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--cool)">Get a key from Google AI Studio ↗</a></div><label class="fl">Gemini API key</label><input id="gKey" type="password" autocomplete="off" placeholder="Paste key (optional; enables grounded hardware search)">':'')+
+    qs.map(q=>'<label class="fl">'+esc(q.q)+(q.required?' <span style="color:var(--warm)">required</span>':'')+'</label>'+
+      '<textarea data-cq="'+escAttr(q.key)+'" placeholder="'+escAttr(q.placeholder||"")+'" style="min-height:58px">'+
+      esc((s.answers||{})[q.key]||"")+'</textarea>').join("")+
+    '<div style="display:flex;gap:12px;margin-top:16px"><button class="ghost" id="cBack">← edit request</button>'+
+      '<button class="btn" id="cRetry" style="flex:1">Retry draft →</button></div><div class="err" id="cErr"></div></div>';
+  $("#cBack").onclick=()=>{ S.mode="new"; mountNew(); $("#nName").value=s.name||""; $("#nReq").value=s.req||""; };
+  $("#cRetry").onclick=submitClarifications;
+}
+
+async function submitClarifications(){
+  const s=S.session, answers={...(s.answers||{})};
+  document.querySelectorAll("[data-cq]").forEach(e=>answers[e.dataset.cq]=e.value.trim());
+  const missing=(s.questions||[]).filter(q=>q.required&&!answers[q.key]).map(q=>q.q);
+  if(missing.length){ $("#cErr").textContent="Please answer every required question."; return; }
+  const key=$("#gKey")?$("#gKey").value.trim():"";
+  s.answers=answers; $("#cErr").textContent=""; S.mode="drafting"; renderMain(true);
+  try{
+    if(key){
+      const kr=await fetch("/api/settings/gemini",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({api_key:key})});
+      const kj=await kr.json(); if(!kr.ok) throw new Error(kj.error||"could not save Gemini API key");
+      s.geminiSetupRequired=false;
+    }
+    const r=await fetch("/api/sessions/"+s.id+"/answers",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({answers})});
+    const j=await r.json();
+    if(j.needs_clarification){ s.questions=j.questions||s.questions; s.failure=j.reason||"More detail is needed.";
+      s.geminiSetupRequired=!!j.gemini_setup_required;
+      S.mode="clarify"; renderMain(true); return; }
+    if(!r.ok) throw new Error(j.error||"could not draft the spec");
+    s.spec=j.spec; S.mode="draft"; renderMain(true);
+  }catch(e){ s.failure="Draft retry failed: "+e.message; S.mode="clarify"; renderMain(true); }
 }
 
 function mountGate(){
@@ -623,6 +803,7 @@ function mountGate(){
   }
   sp.quality = sp.quality||"draft"; sp.creativity = sp.creativity||"focused"; sp.style = sp.style||null;
   const eng = sp.engine;
+  const runText = eng==="structural"?"Run topology solve →":eng==="llm-direct"?"Run custom build →":"Run build →";
   const feats = (sp.features||[]).map((f,i)=>featRow(f,i)).join("");
   stage.innerHTML='<div class="card"><h1>Here’s what I understood</h1>'+
     '<div class="sub">Edit anything, then run. The engine and any unit conversions are always worth a glance — they’re the two errors that waste a whole solve.</div>'+
@@ -631,6 +812,7 @@ function mountGate(){
       '<span class="seg" id="segEng">'+
         '<button class="'+(eng==="structural"?"on struct":"")+'" data-e="structural">Structural</button>'+
         '<button class="'+(eng==="stack"?"on param":"")+'" data-e="stack">Parametric</button>'+
+        '<button class="'+(eng==="llm-direct"?"on param":"")+'" data-e="llm-direct">Custom</button>'+
       '</span><div class="rationale" id="engWhy"></div></span></div>'+
     '<div class="gaterow"><span class="gk">Style</span><div id="gStyle"></div></div>'+
     '<div id="structOpts"'+(eng==="structural"?"":' style="display:none"')+'>'+
@@ -645,13 +827,13 @@ function mountGate(){
       ["x","y","z"].map(a=>'<input type="number" step="any" value="'+(sp.bbox[a]??"")+'" id="gb_'+a+'" style="width:78px;display:inline-block">').join(' <span class="conv">×</span> ')+
       ' <span class="conv">mm</span></span></div>'+
     '<div class="gaterow"><span class="gk">Objective</span><input id="gObj" value="'+escAttr(sp.objective||"")+'"></div>'+
-    '<div id="featBlock"'+(eng==="stack"?"":' style="display:none"')+'>'+
+    '<div id="featBlock"'+(eng!=="structural"?"":' style="display:none"')+'>'+
       '<div class="gaterow"><span class="gk">Exact holes</span><div id="gFeats">'+(feats||'<span class="hint">none</span>')+'</div></div>'+
       '<div style="margin-left:146px;margin-top:2px"><button class="ghost" id="gAddF">+ add hole</button></div>'+
     '</div>'+
     schematicSVG(sp)+
     '<div style="display:flex;gap:12px;margin-top:18px"><button class="ghost" id="gBack">← edit brief</button>'+
-      '<button class="btn '+(eng==="structural"?"warm":"")+'" id="gRun" style="flex:1">Run '+(eng==="structural"?"topology solve":"build")+' →</button></div>'+
+      '<button class="btn '+(eng==="structural"?"warm":"")+'" id="gRun" style="flex:1">'+runText+'</button></div>'+
     '<div class="err" id="gErr"></div></div>';
   wireGate();
 }
@@ -681,13 +863,21 @@ function revisionRunLabel(c){
 function renderGapChips(){
   const box=$("#gapChips"); if(!box) return;
   const sp=S.session.spec, req=((S.session&&S.session.req)||"").toLowerCase(), chips=[];
-  chips.push({t:"engine · "+(sp.engine==="structural"?"structural":"parametric"), c:sp.engine==="structural"?"warm":"cool"});
+  const ename=sp.engine==="structural"?"structural":sp.engine==="llm-direct"?"custom":"template";
+  chips.push({t:"engine · "+ename, c:sp.engine==="structural"?"warm":"cool"});
+  if(sp.capability_gaps&&sp.capability_gaps.length)
+    chips.push({t:"custom geometry · "+sp.capability_gaps.join(", "),c:"warn"});
+  if(sp.reference&&sp.reference.query){
+    const grounded=sp.reference.mode==="grounded_search";
+    chips.push({t:(grounded?"Gemini Search · ":"Gemini knowledge (not web-grounded) · ")+sp.reference.query,c:grounded?"cool":"warn"});
+  }
   const styd=sp.style&&S.styles&&S.styles.styles&&S.styles.styles[sp.style];
   if(styd) chips.push({t:"style · "+styd.label, c:""});
   const imperial=/inch|inches|"|feet|foot|\bft\b|'/.test(req);
   chips.push({t:imperial?"units · mm ← imperial":"units · mm", c:"cool"});
-  if(!/\d/.test(req)) chips.push({t:"size inferred — confirm below", c:"warn"});
-  const holes=sp.engine==="stack" ? (sp.features||[]).reduce((n,f)=>n+(+f.count||0),0) : 0;
+  const clarifiedSize=(S.session.answers&&S.session.answers.overall)||"";
+  if(!/\d/.test(req)&&!/\d/.test(clarifiedSize)) chips.push({t:"size inferred — confirm below", c:"warn"});
+  const holes=sp.engine!=="structural" ? (sp.features||[]).reduce((n,f)=>n+(+f.count||0),0) : 0;
   if(holes) chips.push({t:holes+" hole"+(holes>1?"s":"")+" detected", c:""});
   box.innerHTML=chips.map(ch=>'<span class="gc '+ch.c+'">'+esc(ch.t)+'</span>').join("");
 }
@@ -756,19 +946,22 @@ function updateGateNotes(){
 }
 function wireGate(){
   const sp=S.session.spec;
-  const drawStyleMap = ()=>renderStyleMap($("#gStyle"), sp.style, sp.engine, k=>{ sp.style=k; applyStylePrefill(k); renderGapChips(); });
+  const drawStyleMap = ()=>renderStyleMap($("#gStyle"), sp.style, sp.engine==="llm-direct"?"stack":sp.engine, k=>{ sp.style=k; applyStylePrefill(k); renderGapChips(); });
   const setEng = e=>{
     sp.engine=e;
     for(const b of document.querySelectorAll("#segEng button")){
       const on=b.dataset.e===e; b.className = on?("on "+(e==="structural"?"struct":"param")):"";
     }
     $("#engWhy").textContent = e==="structural"
-      ? "Structural — grows minimal material along the load paths. Best when you gave a load, not a fixed shape."
-      : "Parametric — an exact editable shape from a template. Best for plates, flanges, enclosures with precise faces.";
+      ? "Structural — grows minimal material along load paths. Best when you gave a load, not a fixed shape."
+      : e==="llm-direct"
+        ? "Custom — writes geometry for details the fixed templates cannot represent; every named capability is audited before success."
+        : "Parametric — exact and fast, but limited to the fixed sphere, pyramid, plate, flange, and plain enclosure templates.";
     $("#structOpts").style.display = e==="structural"?"":"none";
-    const fb=$("#featBlock"); if(fb) fb.style.display = e==="stack"?"":"none";
+    const fb=$("#featBlock"); if(fb) fb.style.display = e!=="structural"?"":"none";
     const run=$("#gRun"); run.className="btn "+(e==="structural"?"warm":"");
-    if(e==="structural") updateGateNotes(); else run.textContent="Run build →";
+    if(e==="structural") updateGateNotes();
+    else run.textContent=e==="llm-direct"?"Run custom build →":"Run build →";
     renderGapChips(); drawStyleMap();      // dimming follows the engine
   };
   document.querySelectorAll("#segEng button").forEach(b=>b.onclick=()=>setEng(b.dataset.e));
@@ -783,7 +976,7 @@ function wireGate(){
 async function runDraft(){
   const sp=S.session.spec;
   const bbox={}; for(const a of ["x","y","z"]){ const v=$("#gb_"+a).value; if(v!=="") bbox[a]=+v; }
-  const features=sp.engine==="stack" ? [...document.querySelectorAll("#gFeats .feat")].map(d=>{
+  const features=sp.engine!=="structural" ? [...document.querySelectorAll("#gFeats .feat")].map(d=>{
     const o={}; d.querySelectorAll("input").forEach(i=>o[i.dataset.k]=i.value); return o;
   }).filter(f=>f.diameter_mm&&f.count) : [];
   const body={engine:sp.engine, bbox, features, objective:$("#gObj").value,
@@ -805,7 +998,7 @@ function schematicSVG(sp){
   const W=260,H=150,pad=30; const sc=Math.min((W-2*pad)/(x+y*0.5),(H-2*pad)/(z+y*0.5));
   const dx=x*sc, dz=z*sc, dy=y*0.5*sc;
   const ox=pad, oy=H-pad-dy;
-  const holes=sp.engine==="stack" ? (sp.features||[]).reduce((n,f)=>n+(+f.count||0),0) : 0;
+  const holes=sp.engine!=="structural" ? (sp.features||[]).reduce((n,f)=>n+(+f.count||0),0) : 0;
   let hc=""; const nh=Math.min(holes,8);
   for(let i=0;i<nh;i++){ const cx=ox+dx*((i+1)/(nh+1)), cy=oy-dz/2; hc+='<circle cx="'+cx.toFixed(0)+'" cy="'+cy.toFixed(0)+'" r="4" fill="#080b0f" stroke="'+(sp.engine==="structural"?"#ff8a5c":"#4fc3f7")+'" stroke-width="1.4"/>'; }
   const col=sp.engine==="structural"?"#ff8a5c":"#4fc3f7";
@@ -816,9 +1009,50 @@ function schematicSVG(sp){
     hc+'<text x="'+ox+'" y="'+(H-8)+'" fill="#5a6778" font-family="ui-monospace,monospace" font-size="9">'+x+' × '+y+' × '+z+' mm'+(holes?(" · "+holes+" holes"):"")+'</text></svg>';
 }
 
+function pickHighlights(){
+  const regs=(S.editRegions||[]).slice();
+  return regs.concat((S.editLoads||[]).map(l=>({box:l.box,tris:l.tris,rule:"load"})));
+}
+function cloneRegions(regs){ return JSON.parse(JSON.stringify(regs||[])); }
+function rememberRegions(){
+  S.regionHistory=S.regionHistory||[];
+  S.regionHistory.push(cloneRegions(S.editRegions));
+  if(S.regionHistory.length>30) S.regionHistory.shift();
+}
+function triKey(t){
+  if(!t||t.length!==9) return "";
+  const vs=[]; for(let i=0;i<3;i++) vs.push(t.slice(i*3,i*3+3).map(v=>(+v).toFixed(6)).join(","));
+  return vs.sort().join("|");
+}
+function triCenter(t){ return [(t[0]+t[3]+t[6])/3,(t[1]+t[4]+t[7])/3,(t[2]+t[5]+t[8])/3]; }
+function triangleMatcher(tris,tol=.008){
+  const bins=new Map(), key=(x,y,z)=>x+":"+y+":"+z;
+  (tris||[]).forEach(t=>{ const c=triCenter(t),q=c.map(v=>Math.floor(v/tol)),k=key(...q); (bins.get(k)||bins.set(k,[]).get(k)).push(c); });
+  return t=>{ const c=triCenter(t),q=c.map(v=>Math.floor(v/tol));
+    for(let x=-1;x<=1;x++)for(let y=-1;y<=1;y++)for(let z=-1;z<=1;z++){
+      const a=bins.get(key(q[0]+x,q[1]+y,q[2]+z)); if(a&&a.some(p=>(p[0]-c[0])**2+(p[1]-c[1])**2+(p[2]-c[2])**2<=tol*tol)) return true; }
+    return false; };
+}
+
+function vectorMeaning(d){
+  if(!d||d.length!==3||!d.every(Number.isFinite)||Math.hypot(...d)<1e-9) return "enter a non-zero XYZ direction";
+  const axes="XYZ", active=d.map((v,i)=>({v,i})).filter(o=>Math.abs(o.v)>1e-9);
+  if(active.length===1){
+    const o=active[0], sign=o.v<0?"−":"+";
+    return sign+axes[o.i]+" · "+(o.v<0?"opposite the ":"along the ")+"+"+axes[o.i]+" arrow · scale ignored";
+  }
+  return "diagonal toward "+active.map(o=>(o.v<0?"−":"+")+axes[o.i]).join(" / ")+" · ratios set angle; scale ignored";
+}
+
 /* ---------- JOB stage (mount once, update in place) ---------- */
 function mountJob(j){
-  stopPlay(); S.film[j.id]=0; S.vfront="A";
+  stopPlay(); S.film[j.id]=0; S.vfront="A"; S.regionHistory=[]; S.retainOp="add"; S.textureView="iso";
+  if(j.config&&j.config.engine==="structural"){
+    S.editLoads=(j.config.loads||[]).map(l=>{ const o={box:l.box.slice(),dir:l.dir.slice()};
+      if(l.tris) o.tris=l.tris.map(t=>t.slice()); return o; });
+    S.editRegions=(j.config.regions||[]).map(r=>{ const o={box:(r.box||[0.94,0,0,1,1,1]).slice(),rule:r.rule};
+      if(r.tris) o.tris=r.tris.map(t=>t.slice()); return o; });
+  }
   $("#stage").innerHTML =
     '<div class="jobhead"><span class="jn" id="jName"></span><span class="badge" id="jBadge"></span>'+
     '<span class="stylepill" id="jStyle" style="display:none"></span>'+
@@ -830,15 +1064,42 @@ function mountJob(j){
       '<img id="jImgB" class="vlayer" alt="" style="opacity:0">'+
       '<canvas id="jGL" class="glview"></canvas>'+
       '<div class="picktools" id="jPickTools" style="display:none">'+
-        '<span class="pl">click a face →</span>'+
+        '<span class="pl">retain region →</span>'+
         '<button type="button" data-tool="" class="on">✋ rotate</button>'+
-        '<button type="button" data-tool="solid">🧱 solid</button>'+
-        '<button type="button" data-tool="preserve">📐 preserve</button>'+
-        '<button type="button" data-tool="void">⬛ clear</button>'+
+        '<button type="button" data-tool="retain-box" title="drag corner-to-corner; retain visible surfaces inside the rectangle">▭ box</button>'+
+        '<button type="button" data-tool="retain-circle" title="drag from center to edge; retain visible surfaces inside the circle">○ circle</button>'+
+        '<span class="retainops" id="jRetainOps" style="display:none">'+
+          '<button type="button" data-retain-op="add" class="on" title="add selected area to retained surfaces">＋ add</button>'+
+          '<button type="button" data-retain-op="remove" title="remove selected area from retained surfaces">− remove</button>'+
+        '</span>'+
+        '<button type="button" data-tool="solid" title="force selected connected surface to remain solid">🧱 solid</button>'+
+        '<button type="button" data-tool="void" title="force a connected surface region to remain empty">⬛ void</button>'+
+        '<button type="button" data-tool="load">⬇ load</button>'+
+        '<span class="loadvec" id="jLoadVec" style="display:none" title="unitless direction components; magnitude is normalized">'+
+          '<span class="pl">unitless model direction</span>'+
+          '<span class="axis-tag axis-x">X</span><input type="number" step="any" value="0" data-lv="0" aria-label="load x">'+
+          '<span class="axis-tag axis-y">Y</span><input type="number" step="any" value="0" data-lv="1" aria-label="load y">'+
+          '<span class="axis-tag axis-z">Z</span><input type="number" step="any" value="-1" data-lv="2" aria-label="load z">'+
+          '<span class="vecmeaning" id="jLoadMeaning">−Z · opposite the +Z arrow · scale ignored</span>'+
+        '</span>'+
         '<button type="button" data-act="undo" title="undo last pick">↩</button>'+
-        '<button type="button" data-act="clearpicks" title="remove every picked region">✕ all</button>'+
+        '<button type="button" data-act="clearpicks" title="clear picks for the active tool">✕ all</button>'+
       '</div>'+
+      '<div id="jSelectShape" class="selectshape"></div>'+
+      '<div class="viewctl" id="jViews" aria-label="standard model views">'+
+        '<div class="vtitle"><span>Standard views</span><span>XYZ</span></div>'+
+        '<div class="vgrid">'+
+          '<button type="button" data-view="top">Top</button><button type="button" data-view="iso" class="on">Iso</button><button type="button" data-view="bottom">Bottom</button>'+
+          '<button type="button" data-view="left">Left</button><button type="button" data-view="front">Front</button><button type="button" data-view="right">Right</button>'+
+          '<button type="button" data-view="back">Back</button><button type="button" data-view="fit">Fit</button><button type="button" data-view="iso-back">Iso ↺</button>'+
+        '</div></div>'+
       '<div class="glhint">drag&nbsp;orbit&nbsp;·&nbsp;scroll&nbsp;zoom&nbsp;·&nbsp;shift-drag&nbsp;pan</div>'+
+      '<svg id="jAxis" class="axisgizmo" viewBox="0 0 94 94" aria-label="model coordinate axes">'+
+        '<line id="jAxisXn" class="neg" stroke="#ff6b6b"/><line id="jAxisX" stroke="#ff6b6b"/><circle id="jAxisXd" r="2.5" fill="#ff6b6b"/><text id="jAxisXt" fill="#ff6b6b">+X</text>'+
+        '<line id="jAxisYn" class="neg" stroke="#63d471"/><line id="jAxisY" stroke="#63d471"/><circle id="jAxisYd" r="2.5" fill="#63d471"/><text id="jAxisYt" fill="#63d471">+Y</text>'+
+        '<line id="jAxisZn" class="neg" stroke="#4fc3f7"/><line id="jAxisZ" stroke="#4fc3f7"/><circle id="jAxisZd" r="2.5" fill="#4fc3f7"/><text id="jAxisZt" fill="#4fc3f7">+Z</text>'+
+        '<circle class="origin" cx="47" cy="47" r="2.5"/><text class="caption" x="47" y="89" text-anchor="middle">model axes</text>'+
+      '</svg>'+
       '<svg id="jCallouts" class="callouts" style="display:none"></svg>'+
       '<div class="cmp" id="jCompare" style="display:none"></div>'+
       '<div class="wash" id="jWash" style="display:none"><span class="sp"></span><span id="jWashT"></span></div>'+
@@ -856,32 +1117,103 @@ function mountJob(j){
   $("#jPlay").onclick = togglePlay;
   $("#jCmp").onclick = ()=>{ S.compare=!S.compare; if(S.compare)S.gl3d=false; updateJob(selected()); };
   $("#jDims").onclick = ()=>{ S.dims=!S.dims; updateJob(selected()); };
-  $("#j3D").onclick = ()=>{ S.gl3d=!S.gl3d; if(S.gl3d)S.compare=false; if(!S.gl3d){S.pickTool=null;GLV.setTool(null);} updateJob(selected()); };
-  // 3D click-to-pick: a toolbar tool + a click on a face adds a keep-region to the recipe
+  $("#j3D").onclick = ()=>{ S.gl3d=!S.gl3d;
+    if(S.gl3d){ S.compare=false; S.dims=false; }
+    else { S.pickTool=null; GLV.setTool(null); GLV.setView("iso"); S.textureView="iso"; }
+    updateJob(selected()); };
+  // 3D click-to-pick: keep tools add regions; load adds a face + direction to the recipe.
   S.pickTool=null; GLV.setTool(null);                    // sync GLV's tool with the reset toolbar
   const pt=$("#jPickTools");
   const flash=(msg)=>{ const h=$(".viewport .glhint"); if(!h) return;
     if(h.dataset.base==null) h.dataset.base=h.textContent;
     h.textContent=msg; clearTimeout(h._t); h._t=setTimeout(()=>{ h.textContent=h.dataset.base; },2600); };
   const pickTool=(t)=>{ S.pickTool=t||null; GLV.setTool(S.pickTool);
-    if(pt) pt.querySelectorAll("button[data-tool]").forEach(x=>x.className=((x.dataset.tool||null)===S.pickTool?"on":"")); };
+    if(pt){ pt.querySelectorAll("button[data-tool]").forEach(x=>x.className=((x.dataset.tool||null)===S.pickTool?"on":""));
+      const lv=$("#jLoadVec"); if(lv) lv.style.display=S.pickTool==="load"?"":"none";
+      const ro=$("#jRetainOps"); if(ro) ro.style.display=/^retain-/.test(S.pickTool||"")?"":"none";
+      updateLoadMeaning(); } };
+  const loadVector=()=>{ const es=pt?[...pt.querySelectorAll("[data-lv]")]:[];
+    const d=es.map(e=>+e.value); return d.length===3&&d.every(Number.isFinite)&&Math.hypot(...d)>1e-9?d:null; };
+  const updateLoadMeaning=()=>{ const out=$("#jLoadMeaning"); if(out) out.textContent=vectorMeaning(loadVector()); };
   if(pt){
+    pt.querySelectorAll("[data-lv]").forEach(e=>e.oninput=updateLoadMeaning);
     pt.querySelectorAll("button[data-tool]").forEach(b=>b.onclick=()=>pickTool(b.dataset.tool||null));
-    // mistakes happen: ↩ undoes the last pick, ✕ all wipes every region
-    pt.querySelector('[data-act="undo"]').onclick=()=>{ syncRegionsFromDOM();
-      const r=(S.editRegions||[]).pop();
-      renderRegions(); GLV.setHighlight(S.editRegions);
-      flash(r?("↩ removed "+r.rule+(r.tris?" face":" region")):"nothing to undo"); };
-    pt.querySelector('[data-act="clearpicks"]').onclick=()=>{ const n=(S.editRegions||[]).length;
-      S.editRegions=[]; renderRegions(); GLV.setHighlight([]);
-      flash(n?("✕ cleared "+n+" region"+(n===1?"":"s")):"no regions set"); };
+    pt.querySelectorAll("[data-retain-op]").forEach(b=>b.onclick=()=>{ S.retainOp=b.dataset.retainOp;
+      pt.querySelectorAll("[data-retain-op]").forEach(x=>x.className=x===b?"on":""); GLV.setRetainOp(S.retainOp); });
+    GLV.setRetainOp(S.retainOp||"add");
+    // mistakes happen: ↩ and ✕ operate on loads while the load tool is active;
+    // retain boundary selections use snapshot history so Add and Remove are undoable.
+    pt.querySelector('[data-act="undo"]').onclick=()=>{
+      if(S.pickTool==="load"){ syncLoadsFromDOM(); const l=(S.editLoads||[]).pop(); renderLoads();
+        GLV.setHighlight(pickHighlights()); flash(l?"↩ removed load":"no loads to undo"); return; }
+      syncRegionsFromDOM(); const prev=(S.regionHistory||[]).pop();
+      let changed=false; if(prev){ S.editRegions=prev; changed=true; }
+      else if((S.editRegions||[]).length){ S.editRegions.pop(); changed=true; }
+      renderRegions(); GLV.setHighlight(pickHighlights());
+      flash(changed?"↩ restored previous retain selection":"nothing to undo"); };
+    pt.querySelector('[data-act="clearpicks"]').onclick=()=>{
+      if(S.pickTool==="load"){ const n=(S.editLoads||[]).length; S.editLoads=[]; renderLoads();
+        GLV.setHighlight(pickHighlights()); flash(n?("✕ cleared "+n+" load"+(n===1?"":"s")):"no loads set"); return; }
+      const preserveOnly=/^retain-/.test(S.pickTool||"");
+      const n=(S.editRegions||[]).filter(r=>!preserveOnly||r.rule==="preserve").length;
+      if(n) rememberRegions();
+      S.editRegions=preserveOnly?(S.editRegions||[]).filter(r=>r.rule!=="preserve"):[]; renderRegions();
+      GLV.setHighlight(pickHighlights());
+      flash(n?("✕ cleared "+n+(preserveOnly?" retained region":" region")+(n===1?"":"s")):"no regions set"); };
   }
+  const views=$("#jViews"); if(views) views.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
+    GLV.setView(b.dataset.view); S.textureView=b.dataset.view;
+    views.querySelectorAll("[data-view]").forEach(x=>x.className=x===b?"on":"");
+    updateTextureViewState();
+  });
   GLV.onPick((rule,pick)=>{                               // a face was clicked with a tool active
+    const same=(a,b)=>a&&b&&a.length===6&&b.length===6&&a.every((v,i)=>Math.abs(v-b[i])<0.015);
+    if(rule==="load"){
+      syncLoadsFromDOM(); const dir=loadVector();
+      if(!dir){ flash("✕ load direction must contain a non-zero X, Y, or Z"); return; }
+      S.editLoads=S.editLoads||[];
+      let i=S.editLoads.findIndex(l=>same(l.box,pick.box));
+      const load={box:pick.box.slice(),dir:dir.slice()}; if(pick.tris) load.tris=pick.tris;
+      if(i<0&&S.editLoads.length===1&&!S.editLoads[0].tris) i=0; // first 3D pick replaces the lone recipe/default load
+      if(i>=0) S.editLoads[i]=load; else S.editLoads.push(load);
+      renderLoads(); GLV.setHighlight(pickHighlights());
+      flash((i>=0?"↷ updated load":"＋ load")+" · "+vectorMeaning(dir)+" on "+pick.face+" face — Run revision to apply");
+      return;
+    }
     syncRegionsFromDOM();
     S.editRegions=S.editRegions||[];
+    if(/^retain-/.test(rule)&&pick.tooLarge){
+      flash("selection contains "+pick.ntri.toLocaleString()+" triangles; zoom in or draw a smaller boundary"); return;
+    }
+    if(/^retain-/.test(rule)&&pick.tris&&pick.tris.length){
+      const keys=new Set(pick.tris.map(triKey)), selectedNear=triangleMatcher(pick.tris);
+      if(S.retainOp==="remove"){
+        let removed=0;
+        const next=[];
+        S.editRegions.forEach(r=>{
+          if(r.rule!=="preserve"||!r.tris){ next.push(r); return; }
+          const keep=r.tris.filter(t=>{ const hit=keys.has(triKey(t))||selectedNear(t); if(hit) removed++; return !hit; });
+          if(keep.length) next.push({...r,tris:keep});
+        });
+        if(!removed){ flash("selection did not overlap a retained region"); return; }
+        rememberRegions(); S.editRegions=next;
+        renderRegions(); GLV.setHighlight(pickHighlights());
+        flash("− removed "+removed+" triangle"+(removed===1?"":"s")+" from retained regions"); return;
+      }
+      const old=[]; S.editRegions.forEach(r=>{ if(r.rule==="preserve"&&r.tris) old.push(...r.tris); });
+      const have=new Set(old.map(triKey)), alreadyNear=triangleMatcher(old);
+      const fresh=pick.tris.filter(t=>!have.has(triKey(t))&&!alreadyNear(t));
+      if(!fresh.length){ flash("that area is already retained"); return; }
+      rememberRegions();
+      const chunk=20000;                          // also safe if the already-running server predates this fix
+      for(let i=0;i<fresh.length;i+=chunk)
+        S.editRegions.push({box:pick.box.slice(),rule:"preserve",tris:fresh.slice(i,i+chunk)});
+      renderRegions(); GLV.setHighlight(pickHighlights());
+      flash("＋ retained "+fresh.length.toLocaleString()+" visible triangle"+(fresh.length===1?"":"s")+" — Run revision to apply"); return;
+    }
     // clicking an already-picked face unpicks it (same rule) or just swaps its rule
-    const same=(a,b)=>a&&b&&a.length===6&&b.length===6&&a.every((v,i)=>Math.abs(v-b[i])<0.015);
     const i=S.editRegions.findIndex(r=>r.tris&&same(r.box,pick.box));
+    rememberRegions();
     if(i>=0){
       if(S.editRegions[i].rule===rule){ S.editRegions.splice(i,1); flash("− unpicked face (click again to re-add)"); }
       else { S.editRegions[i].rule=rule; flash("↷ face is now "+rule); }
@@ -891,7 +1223,7 @@ function mountJob(j){
       flash(pick.tris ? ("＋ "+rule+" · "+pick.ntri+"-triangle face — Run revision to apply")
                       : ("＋ "+rule+" on "+pick.face+" face — Run revision to apply"));
     }
-    renderRegions(); GLV.setHighlight(S.editRegions);
+    renderRegions(); GLV.setHighlight(pickHighlights());
   });
 }
 /* cross-fade the viewport to a new frame url (fixed camera ⇒ registers in place) */
@@ -903,21 +1235,34 @@ function showFrame(url){
   if(back.dataset.src===url){ swap(); return; }        // preloaded → just cross-fade
   back.onload=swap; back.onerror=null; back.src=url; back.dataset.src=url;
 }
-function iterList(j){ return j.iterations||[]; }
+function iterList(j){
+  const its=(j&&j.iterations)||[];
+  const oneShot=j&&j.generator==="structural"&&
+    (j.upload_baseline||(j.config&&j.config.revision_mode==="form"));
+  if(oneShot){
+    for(let i=its.length-1;i>=0;i--) if(its[i].label==="final") return [its[i]];
+  }
+  return its;
+}
 function shownIter(j){ const its=iterList(j);
   return S.selIter!=null ? its.find(i=>i.iteration===S.selIter) : its[its.length-1]; }
 
 function updateJob(j){
   if(!j) return;
   $("#jName").textContent = j.name;
-  const bd=$("#jBadge"); bd.textContent=j.state; bd.className="badge "+badgeClass(j.state);
+  const fullMaterial=j.generator==="structural"&&j.config&&j.config.revision_mode!=="form"&&+j.config.volfrac>=0.999;
+  const bd=$("#jBadge");
+  bd.textContent=j.state==="done"&&fullMaterial?(j.upload_baseline?"baseline":"done · unchanged"):j.state;
+  bd.className="badge "+badgeClass(j.state);
   $("#jCancel").style.display = RUNNING.has(j.state)?"":"none";
   // style badge + viewport accent (S1)
   const st=styleOf(j), sp=$("#jStyle");
   if(sp){ if(st){ sp.style.display=""; sp.innerHTML=styleSwatch(st.palette)+esc(st.label); }
     else sp.style.display="none"; }
   const vp=$(".viewport"); if(vp) vp.style.borderColor = (st&&st.palette)?safeHex(st.palette.edge_hex):"";
-  const its=iterList(j), shown=shownIter(j), pinned=S.selIter!=null;
+  const its=iterList(j);
+  if(S.selIter!=null&&!its.some(i=>i.iteration===S.selIter)) S.selIter=null;
+  const shown=shownIter(j), pinned=S.selIter!=null;
 
   // viewport: cross-fade to the latest good frame (fixed camera ⇒ grows in place)
   if(shown&&shown.preview) showFrame("/files/"+shown.preview+"?t="+j.updated);
@@ -955,22 +1300,37 @@ function updateJob(j){
   const dl=$("#jCmpDelta");
   if(dl){ if(S.compare&&canCmp){ dl.style.display=""; dl.innerHTML=compareDelta(j,base); } else dl.style.display="none"; }
 
-  // Phase 1: interactive WebGL 3D viewer — any finished job that produced an STL
+  // A completed final STL uses the depth-buffered WebGL renderer even in the passive
+  // preview. Historical frames, live solves, compare, and dimensions remain PNG-based.
   const ff=finalFrame(j), stlUrl=(ff&&ff.stl)?("/files/"+ff.stl+"?t="+j.updated):null;
-  const can3d = !RUNNING.has(j.state) && !!stlUrl && !S.compare;
+  if(pinned&&S.gl3d){ S.gl3d=false; S.pickTool=null; GLV.setTool(null); }
+  const can3d = !RUNNING.has(j.state) && !!stlUrl && !pinned && !S.compare;
+  let interactive3d=S.gl3d&&can3d;
+  let passive3d=!S.gl3d&&can3d&&!S.dims;
+  let show3d=interactive3d||passive3d;
   const b3d=$("#j3D");
-  if(b3d){ b3d.style.display = can3d?"":"none"; b3d.textContent = (S.gl3d&&can3d)?"✕ 3D":"◲ rotate"; }
+  if(b3d){ b3d.style.display = can3d?"":"none"; b3d.textContent = interactive3d?"✕ 3D":"◲ rotate"; }
   if(!can3d && S.gl3d) S.gl3d=false;
-  if(S.gl3d && can3d){
+  if(show3d){
     if(GLV.mount($("#jGL"))){
       const st3=styleOf(j), hex3=(st3&&st3.palette&&st3.palette.render_hex)||"#7ba7c9";
-      GLV.show(stlUrl, hex3);
-      GLV.setHighlight(S.editRegions||[]);               // show existing keep-regions on the model
-    } else { S.gl3d=false; if(b3d) b3d.textContent="◲ rotate"; }  // no WebGL → fall back to PNG
+      // Preserve real CAD feature edges while smoothing source/texture tessellation.
+      // Imported curved patches on typical CAD STLs stay well below 40°, while chamfers,
+      // countersinks, and corners begin around 45°. Relief needs a slightly wider smoothing
+      // window because its deliberately steeper sampling mesh is not a set of design facets.
+      // The old 50°/12° split crossed real baseline edges and exposed every texture triangle.
+      const crease3=(j.config&&j.config.surface_texture)?60:40;
+      GLV.show(stlUrl, hex3, crease3);
+      GLV.setHighlight(interactive3d?pickHighlights():[]); // passive preview is the unannotated result
+    } else {                                             // no WebGL → fall back to the PNG
+      S.gl3d=false; interactive3d=passive3d=show3d=false;
+      if(b3d) b3d.textContent="◲ rotate";
+    }
   } else GLV.hide();
-  if(vp) vp.classList.toggle("gl-on", S.gl3d && can3d);
+  if(vp){ vp.classList.toggle("gl-visible",show3d);
+    vp.classList.toggle("gl-interactive",interactive3d); }
   const pt=$("#jPickTools");                              // face-pick toolbar: 3D + structural only
-  if(pt){ const showTools = S.gl3d && can3d && j.generator==="structural";
+  if(pt){ const showTools = interactive3d && j.generator==="structural";
     pt.style.display = showTools ? "" : "none";
     if(!showTools && S.pickTool){ S.pickTool=null; GLV.setTool(null); } }
 
@@ -1099,12 +1459,27 @@ function failReason(j){
   return ((l.slice(-1)[0])||"stopped").replace(/^\[[^\]]*\]\s*/,"");
 }
 function renderProg(j){
-  const p=$("#jProg"); const its=iterList(j);
+  const p=$("#jProg"), raw=(j&&j.iterations)||[];
   if(j.generator==="structural"){
-    const cur=its.length, tot=Math.max(cur, 50);
-    p.innerHTML='<span>i '+cur+'/'+tot+'</span>'+
-      '<div class="ibar"><i style="width:'+Math.min(100,cur/tot*100)+'%"></i></div>'+
-      (j.state==="optimizing"?'<span style="color:var(--warm)">compliance ↓</span>':'');
+    const cfg=j.config||{}, active=RUNNING.has(j.state);
+    if(j.upload_baseline){
+      p.innerHTML='<span>Original mesh · no optimization run</span>';
+      return;
+    }
+    if(cfg.revision_mode==="form"){
+      p.innerHTML='<span>'+(active?'Applying surface revision…':'Surface revision complete')+'</span>';
+      return;
+    }
+    const steps=raw.filter(it=>/^topo-\d+$/.test(it.label||""));
+    const cur=steps.length, preset={draft:50,balanced:90,fine:130,ultra:160};
+    const tot=Math.max(cur, +(cfg.solver_max_iters||preset[cfg.quality]||cur||1));
+    const done=j.state==="done", failed=j.state==="failed"||j.state==="error"||j.state==="canceled";
+    const label=active?('Optimization step '+cur+' · up to '+tot):
+      done?('Optimization complete · '+cur+' step'+(cur===1?'':'s')):
+      failed?('Optimization stopped · '+cur+' step'+(cur===1?'':'s')):('Optimization · '+cur+' steps');
+    p.innerHTML='<span>'+label+'</span>'+
+      '<div class="ibar"><i style="width:'+(done?100:Math.min(100,cur/tot*100))+'%"></i></div>'+
+      (j.state==="optimizing"?'<span style="color:var(--warm)">solving load paths</span>':'');
   } else if(RUNNING.has(j.state)||j.state==="done"||j.state==="failed"){
     const stages=["configuring","building","verifying","done"];
     const idx = j.state==="done"?4 : j.state==="failed"?3 : {configuring:1,generating:1,building:2,verifying:3,queued:0}[j.state]||0;
@@ -1113,7 +1488,8 @@ function renderProg(j){
       (i<stages.length-1?'<span class="ar">→</span>':'')).join("")+'</span>';
   } else p.innerHTML="";
 }
-/* live sparklines: compliance (should fall) + material fraction (holds target) */
+/* Live solve history. During continuation, compliance normally rises as material is removed;
+   showing a down-arrow here falsely implied the optimizer was failing. */
 function sparkPts(vals){
   const n=vals.length, W=250,H=30, mn=Math.min(...vals), mx=Math.max(...vals), rng=(mx-mn)||1;
   return vals.map((v,i)=>((n<2?0:i/(n-1))*W).toFixed(1)+","+(H-3-((v-mn)/rng)*(H-6)).toFixed(1)).join(" ");
@@ -1130,9 +1506,12 @@ function renderSpark(j){
   if(j.generator!=="structural"||its.length<2){ box.style.display="none"; box.innerHTML=""; return; }
   box.style.display="";
   const comp=its.map(i=>+i.metrics.compliance), vol=its.map(i=>+i.metrics.vol_fraction);
+  const design=its.every(i=>i.metrics.design_vol_fraction!=null)
+    ?its.map(i=>+i.metrics.design_vol_fraction):null;
   const c=comp[comp.length-1], v=vol[vol.length-1];
-  box.innerHTML = sparkRow("compliance ↓",comp,"var(--warm)",c<1?c.toFixed(2):c.toFixed(1))+
-    sparkRow("material",vol,"var(--cool)",Math.round(v*100)+"%");
+  box.innerHTML = sparkRow("compliance",comp,"var(--warm)",c<1?c.toFixed(2):c.toFixed(1))+
+    sparkRow("total material",vol,"var(--cool)",Math.round(v*100)+"%")+
+    (design?sparkRow("free material",design,"#a78bfa",Math.round(design[design.length-1]*100)+"%"):"");
 }
 /* parametric: how close each measured dimension is to its target (center=on-spec) */
 function renderSpecDiff(j){
@@ -1173,7 +1552,9 @@ function frEl(j,it){
     it.error ? '<span class="fail">✗</span>' : '<span class="fail">✗</span>';
   d.innerHTML = (it.preview?'<img alt="">':'<div style="aspect-ratio:16/10"></div>')+
     '<div class="cap"><span>'+esc(it.label||("iter "+it.iteration))+'</span>'+badge+'</div>';
-  d.onclick=()=>{ S.selIter=it.iteration; stopPlay(); updateJob(selected()); };
+  d.onclick=()=>{ const its=iterList(j), last=its[its.length-1];
+    S.selIter=last&&last.iteration===it.iteration?null:it.iteration;
+    stopPlay(); updateJob(selected()); };
   return d;
 }
 /* play/scrub the stored frames */
@@ -1194,7 +1575,8 @@ document.addEventListener("keydown",e=>{
   if(e.key==="Escape" && S.pickTool){                    // drop the pick tool → back to rotate
     S.pickTool=null; GLV.setTool(null);
     const pt=$("#jPickTools");
-    if(pt) pt.querySelectorAll("button[data-tool]").forEach(x=>x.className=(x.dataset.tool===""?"on":""));
+    if(pt){ pt.querySelectorAll("button[data-tool]").forEach(x=>x.className=(x.dataset.tool===""?"on":""));
+      const lv=$("#jLoadVec"); if(lv) lv.style.display="none"; }
     return;
   }
   if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return;
@@ -1212,22 +1594,22 @@ document.addEventListener("keydown",e=>{
 /* the callout overlay is drawn in viewport pixels → re-register it on resize (from cache) */
 let _rzT=null;
 window.addEventListener("resize",()=>{ clearTimeout(_rzT); _rzT=setTimeout(()=>{
-  if(S.gl3d) GLV.resize();
+  if($(".viewport.gl-visible")) GLV.resize();
   else if(S.dims&&S.mode==="job"){ const j=selected(); if(j) paintCallouts(j, S.maps[j.id]); }
 },80); });
 
 /* ---------- Phase 1: hand-rolled WebGL STL viewer (offline, zero deps) ---------------------
    Loads result.stl into a lit, orbitable 3D view. mat4 helpers are minimal + column-major
    (WebGL convention). Geometry stays in world mm; the orbit target sits at the bbox centre.
-   Render-on-demand (no RAF loop): we draw after each interaction. Two-sided headlight so a
-   watertight mesh reads cleanly regardless of triangle winding. */
+   Render-on-demand (no RAF loop): we draw after each interaction. A soft view-relative
+   three-point rig keeps the form legible from every angle without clipping highlights. */
 const GLV = (function(){
-  let gl=null, cv=null, prog=null, A={}, U={}, vbo=null, nTris=0, url0=null;
+  let gl=null, cv=null, prog=null, A={}, U={}, vbo=null, nTris=0, url0=null, crease0=null;
   let center=[0,0,0], radius=1, color=[.48,.65,.79];
   let az=-2.15, el=.45, dist=3, tgt=[0,0,0];              // orbit state (az/el radians)
   let drag=null, mounted=false;
-  let geomV=null, bmin=[0,0,0], bdim=[1,1,1];             // CPU geometry + bbox for click-picking
-  let tool=null, onPickCb=null, lastMVP=null;             // click-to-pick state
+  let geomV=null, pickN=null, bmin=[0,0,0], bdim=[1,1,1];  // exact positions + flat normals for picking
+  let tool=null, onPickCb=null, lastMVP=null, retainOp="add"; // click / retain-selection state
   let hbo=null, hRanges=[], hCount=0, hiRegions=null;     // keep-region highlight overlay
   let triV=null, nbr=null, adjUrl=null;                   // per-face flood connectivity (cached per mesh)
   const VS='attribute vec3 aPos;attribute vec3 aNorm;uniform mat4 uMVP;'+
@@ -1236,11 +1618,18 @@ const GLV = (function(){
     'uniform float uFlat;uniform float uAlpha;'+
     'void main(){if(uFlat>0.5){gl_FragColor=vec4(uColor,uAlpha);return;}'+     // flat keep-region overlay
     'vec3 N=normalize(vN);vec3 V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;'+
-    'float key=max(dot(N,V),0.0);'+                                       // camera headlight
-    'float fill=max(dot(N,normalize(vec3(-0.45,0.35,0.82))),0.0)*0.35;'+  // fixed upper fill
-    'float lit=0.34+0.66*key+fill;'+                                       // ambient + key + fill
-    'float rim=pow(1.0-key,3.0)*0.20;'+                                    // silhouette lift
-    'gl_FragColor=vec4(uColor*lit+rim,1.0);}';
+    'vec3 worldUp=vec3(0.0,0.0,1.0);vec3 R=cross(V,worldUp);'+
+    'if(length(R)<0.01)R=vec3(1.0,0.0,0.0);else R=normalize(R);'+
+    'vec3 Up=normalize(cross(R,V));'+
+    'vec3 keyDir=normalize(V-0.55*R+0.65*Up);'+
+    'vec3 fillDir=normalize(V+0.75*R+0.12*Up);'+
+    'float facing=max(dot(N,V),0.0);float key=max(dot(N,keyDir),0.0);'+
+    'float fill=max(dot(N,fillDir),0.0);float hemi=0.5+0.5*N.z;'+
+    'float lit=0.20+0.48*key+0.18*fill+0.08*hemi;'+
+    'vec3 H=normalize(keyDir+V);float spec=0.07*pow(max(dot(N,H),0.0),40.0);'+
+    'float rim=0.05*pow(1.0-facing,3.0);'+
+    'vec3 linearColor=pow(uColor,vec3(2.2))*lit+vec3(spec+rim);'+
+    'gl_FragColor=vec4(pow(clamp(linearColor,0.0,1.0),vec3(0.454545)),1.0);}';
 
   // ---- minimal column-major mat4
   function persp(fovy,asp,n,f){const t=1/Math.tan(fovy/2),d=n-f;
@@ -1306,13 +1695,13 @@ const GLV = (function(){
     const COS=0.978;                                    // ~12° tolerance (flat faces read cleanly)
     const seen=new Uint8Array(nTris), stack=[seed], out=[seed]; seen[seed]=1;
     while(stack.length){ const t=stack.pop(), a=nbr[t];
-      for(let x=0;x<a.length;x++){ const j=a[x]; if(seen[j]) continue; const b=j*18;
-        if(geomV[b+3]*sn[0]+geomV[b+4]*sn[1]+geomV[b+5]*sn[2]>=COS){ seen[j]=1; out.push(j); stack.push(j); } }
+      for(let x=0;x<a.length;x++){ const j=a[x]; if(seen[j]) continue;
+        if(pickN[j*3]*sn[0]+pickN[j*3+1]*sn[1]+pickN[j*3+2]*sn[2]>=COS){ seen[j]=1; out.push(j); stack.push(j); } }
       if(out.length>=20000) break;                      // pathological runaway guard
     }
     return out;
   }
-  function pickAt(cx,cy){                                // canvas px → face patch {face,box,tris} or whole-side {face,box}
+  function rayAt(cx,cy){                                 // canvas CSS px → nearest triangle hit
     if(!lastMVP||!geomV||!nTris) return null;
     const inv=invMat(lastMVP); if(!inv) return null;
     const dpr=Math.min(window.devicePixelRatio||1,2);
@@ -1335,12 +1724,13 @@ const GLV = (function(){
     if(!hit) return null;
     const nz01=[(hit[0]-bmin[0])/bdim[0],(hit[1]-bmin[1])/bdim[1],(hit[2]-bmin[2])/bdim[2]];
     const cand=[['left',nz01[0]],['right',1-nz01[0]],['front',nz01[1]],['back',1-nz01[1]],['bottom',nz01[2]],['top',1-nz01[2]]];
-    cand.sort((a,b)=>a[1]-b[1]); const face=cand[0][0];
-    const sn=[geomV[hidx*18+3],geomV[hidx*18+4],geomV[hidx*18+5]];   // seed face normal
-    const patch=floodFace(hidx,sn);
-    if(patch&&patch.length){                              // per-face patch → exact surface footprint
-      const tris=[]; const bb=[1,1,1,0,0,0];
-      for(let p=0;p<patch.length;p++){ const b=patch[p]*18; const row=[];
+    cand.sort((a,b)=>a[1]-b[1]);
+    return {hit,hidx,face:cand[0][0]};
+  }
+  function trianglePick(ids,face){                        // mesh triangle ids → normalized wire patch
+    if(!ids||!ids.length) return null;
+    const tris=[]; const bb=[1,1,1,0,0,0];
+    for(let p=0;p<ids.length;p++){ const b=ids[p]*18; const row=[];
         for(let k=0;k<3;k++){ const off=b+k*6;
           const cu=Math.min(1,Math.max(0,(geomV[off]-bmin[0])/bdim[0]));
           const cv2=Math.min(1,Math.max(0,(geomV[off+1]-bmin[1])/bdim[1]));
@@ -1349,11 +1739,61 @@ const GLV = (function(){
           if(cu<bb[0])bb[0]=cu; if(cv2<bb[1])bb[1]=cv2; if(cw<bb[2])bb[2]=cw;
           if(cu>bb[3])bb[3]=cu; if(cv2>bb[4])bb[4]=cv2; if(cw>bb[5])bb[5]=cw; }
         tris.push(row); }
-      for(let a=0;a<3;a++){ if(bb[a+3]-bb[a]<0.02){ const m=(bb[a]+bb[a+3])/2;   // give a flat face a valid aabb
-        bb[a]=Math.max(0,m-0.02); bb[a+3]=Math.min(1,m+0.02); } }
-      return {face, box:bb, tris, ntri:patch.length};
+    for(let a=0;a<3;a++){ if(bb[a+3]-bb[a]<0.02){ const m=(bb[a]+bb[a+3])/2;
+      bb[a]=Math.max(0,m-0.02); bb[a+3]=Math.min(1,m+0.02); } }
+    return {face,box:bb,tris,ntri:ids.length,ids:ids.slice()};
+  }
+  function pickAt(cx,cy){                                // click → connected, near-coplanar face
+    const rh=rayAt(cx,cy); if(!rh) return null;
+    const sn=[pickN[rh.hidx*3],pickN[rh.hidx*3+1],pickN[rh.hidx*3+2]];
+    const patch=floodFace(rh.hidx,sn);
+    if(patch&&patch.length) return trianglePick(patch,rh.face);
+    return {face:rh.face, box:FACE_BOX[rh.face].slice()};  // fallback for meshes too large to flood
+  }
+  function screenSelect(x0,y0,x1,y1,shape){               // drag boundary → visible triangle set
+    if(!lastMVP||!geomV||!nTris) return null;
+    const rr=shape==="circle"?Math.hypot(x1-x0,y1-y0):0;
+    const lx=shape==="circle"?x0-rr:Math.min(x0,x1),rx=shape==="circle"?x0+rr:Math.max(x0,x1);
+    const ty=shape==="circle"?y0-rr:Math.min(y0,y1),by=shape==="circle"?y0+rr:Math.max(y0,y1);
+    if(rx-lx<4||by-ty<4) return null;
+    const cx=(lx+rx)/2,cy=(ty+by)/2,erx=(rx-lx)/2,ery=(by-ty)/2,candidates=[];
+    for(let i=0;i<nTris;i++){ const b=i*18;
+      const wx=(geomV[b]+geomV[b+6]+geomV[b+12])/3, wy=(geomV[b+1]+geomV[b+7]+geomV[b+13])/3, wz=(geomV[b+2]+geomV[b+8]+geomV[b+14])/3;
+      const ndc=mulV(lastMVP,[wx,wy,wz]), px=(ndc[0]+1)*.5*cv.clientWidth, py=(1-ndc[1])*.5*cv.clientHeight;
+      const inside=shape==="circle"?(((px-cx)/erx)**2+((py-cy)/ery)**2<=1):(px>=lx&&px<=rx&&py>=ty&&py<=by);
+      if(!inside||ndc[2]<-1||ndc[2]>1) continue;
+      candidates.push({i,px,py,z:ndc[2]});
     }
-    return {face, box:FACE_BOX[face].slice()};            // fallback: whole-side slab (huge mesh)
+    if(!candidates.length) return null;
+    // Rasterize an exact local depth buffer.  Centroid-only screen cells leak triangles
+    // from the rear of curved meshes when no front centroid happens to share that cell.
+    // The z buffer uses every projected triangle, so selection matches what is visible.
+    const step=2,zl=Math.max(0,lx),zt=Math.max(0,ty),zr=Math.min(cv.clientWidth,rx),zb=Math.min(cv.clientHeight,by);
+    const gw=Math.max(1,Math.ceil((zr-zl)/step)),gh=Math.max(1,Math.ceil((zb-zt)/step));
+    const zbuf=new Float32Array(gw*gh); zbuf.fill(Infinity);
+    for(let i=0;i<nTris;i++){ const b=i*18,p=[];
+      for(let k=0;k<3;k++){ const o=b+k*6,n=mulV(lastMVP,[geomV[o],geomV[o+1],geomV[o+2]]);
+        p.push([(n[0]+1)*.5*cv.clientWidth,(1-n[1])*.5*cv.clientHeight,n[2]]); }
+      const minx=Math.max(0,Math.floor((Math.min(p[0][0],p[1][0],p[2][0])-zl)/step));
+      const maxx=Math.min(gw-1,Math.floor((Math.max(p[0][0],p[1][0],p[2][0])-zl)/step));
+      const miny=Math.max(0,Math.floor((Math.min(p[0][1],p[1][1],p[2][1])-zt)/step));
+      const maxy=Math.min(gh-1,Math.floor((Math.max(p[0][1],p[1][1],p[2][1])-zt)/step));
+      if(minx>maxx||miny>maxy) continue;
+      const den=(p[1][1]-p[2][1])*(p[0][0]-p[2][0])+(p[2][0]-p[1][0])*(p[0][1]-p[2][1]);
+      if(Math.abs(den)<1e-9) continue;
+      for(let gy=miny;gy<=maxy;gy++){ const sy=zt+(gy+.5)*step;
+        for(let gx=minx;gx<=maxx;gx++){ const sx=zl+(gx+.5)*step;
+          const w0=((p[1][1]-p[2][1])*(sx-p[2][0])+(p[2][0]-p[1][0])*(sy-p[2][1]))/den;
+          const w1=((p[2][1]-p[0][1])*(sx-p[2][0])+(p[0][0]-p[2][0])*(sy-p[2][1]))/den,w2=1-w0-w1;
+          if(w0<-.0001||w1<-.0001||w2<-.0001) continue;
+          const z=w0*p[0][2]+w1*p[1][2]+w2*p[2][2],q=gy*gw+gx; if(z<zbuf[q])zbuf[q]=z; }
+      }
+    }
+    const visible=candidates.filter(c=>{ const gx=Math.floor((c.px-zl)/step),gy=Math.floor((c.py-zt)/step);
+      if(gx<0||gx>=gw||gy<0||gy>=gh) return false;
+      const surface=zbuf[gy*gw+gx]; return Number.isFinite(surface)&&c.z<=surface+.00015; });
+    if(visible.length>150000) return {tooLarge:true,ntri:visible.length};
+    return trianglePick(visible.map(c=>c.i),"visible selection");
   }
 
   function compile(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
@@ -1361,8 +1801,9 @@ const GLV = (function(){
   function mount(canvas){
     if(mounted && cv===canvas && gl && !gl.isContextLost()) return true;   // reuse a live context
     if(gl){ const ex=gl.getExtension("WEBGL_lose_context"); if(ex) ex.loseContext(); }  // free the old
-    mounted=false; url0=null; gl=null;                     // new canvas ⇒ re-upload geometry
-    nTris=0; geomV=null; lastMVP=null;                     // drop stale mesh so a pick before show() no-ops
+    mounted=false; url0=null; crease0=null; gl=null;        // new canvas ⇒ re-upload geometry
+    nTris=0; geomV=null; pickN=null; lastMVP=null;          // drop stale mesh so a pick before show() no-ops
+    hbo=null; hRanges=[]; hCount=0;                        // GPU buffers never cross WebGL contexts
     try{                                                   // mount MUST NOT throw — degrade to PNG
     cv=canvas; gl=cv.getContext("webgl",{antialias:true,preserveDrawingBuffer:false});
     if(!gl || gl.isContextLost()){ gl=null; return false; }
@@ -1374,59 +1815,102 @@ const GLV = (function(){
     U.flat=gl.getUniformLocation(prog,"uFlat"); U.alpha=gl.getUniformLocation(prog,"uAlpha");
     vbo=gl.createBuffer(); gl.enable(gl.DEPTH_TEST); gl.clearColor(0.031,0.043,0.059,1);
     }catch(e){ gl=null; mounted=false; return false; }
-    // interaction (pointer events; render-on-demand)
-    cv.addEventListener("pointerdown",e=>{ drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,moved:0,pan:e.shiftKey||e.button===2}; cv.setPointerCapture(e.pointerId); e.preventDefault(); });
-    cv.addEventListener("pointermove",e=>{ if(!drag)return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY; drag.moved+=Math.abs(dx)+Math.abs(dy);
+    // interaction (pointer events; render-on-demand). Retain tools draw a temporary
+    // rectangle/circle boundary, then convert only the visible enclosed triangles.
+    const selectionMode=()=>tool==="retain-box"||tool==="retain-circle";
+    const shapeEl=()=>cv.parentElement&&cv.parentElement.querySelector("#jSelectShape");
+    const updateShape=e=>{ const s=shapeEl(); if(!s||!drag||!drag.select) return; const r=cv.getBoundingClientRect();
+      const x0=drag.sx-r.left,y0=drag.sy-r.top,x1=e.clientX-r.left,y1=e.clientY-r.top;
+      const rr=tool==="retain-circle"?Math.hypot(x1-x0,y1-y0):0;
+      s.style.display="block"; s.style.left=(tool==="retain-circle"?x0-rr:Math.min(x0,x1))+"px"; s.style.top=(tool==="retain-circle"?y0-rr:Math.min(y0,y1))+"px";
+      s.style.width=(tool==="retain-circle"?rr*2:Math.abs(x1-x0))+"px"; s.style.height=(tool==="retain-circle"?rr*2:Math.abs(y1-y0))+"px";
+      s.className="selectshape"+(tool==="retain-circle"?" circle":"")+(retainOp==="remove"?" remove":""); };
+    cv.addEventListener("pointerdown",e=>{ const select=e.button===0&&selectionMode()&&!e.shiftKey;
+      drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,moved:0,pan:e.shiftKey||e.button===2,select};
+      cv.setPointerCapture(e.pointerId); if(select) updateShape(e); e.preventDefault(); });
+    cv.addEventListener("pointermove",e=>{ if(!drag)return;
+      if(drag.select){ updateShape(e); return; }
+      const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY; drag.moved+=Math.abs(dx)+Math.abs(dy);
       if(drag.pan){ const e0=eye(); let z=[tgt[0]-e0[0],tgt[1]-e0[1],tgt[2]-e0[2]];const zl=Math.hypot(z[0],z[1],z[2])||1;z=[z[0]/zl,z[1]/zl,z[2]/zl];
         const up=[0,0,1]; let x=[up[1]*z[2]-up[2]*z[1],up[2]*z[0]-up[0]*z[2],up[0]*z[1]-up[1]*z[0]];const xl=Math.hypot(x[0],x[1],x[2])||1;x=[x[0]/xl,x[1]/xl,x[2]/xl];
         let y=[z[1]*x[2]-z[2]*x[1],z[2]*x[0]-z[0]*x[2],z[0]*x[1]-z[1]*x[0]];
         const k=dist*0.0016; tgt=[tgt[0]-(x[0]*dx-y[0]*dy)*k, tgt[1]-(x[1]*dx-y[1]*dy)*k, tgt[2]-(x[2]*dx-y[2]*dy)*k]; }
-      else { az-=dx*0.01; el+=dy*0.01; const L=1.5533; el=Math.max(-L,Math.min(L,el)); }
+      else { az-=dx*0.01; el+=dy*0.01; S.textureView="free"; updateTextureViewState(); const L=1.5533; el=Math.max(-L,Math.min(L,el));
+        const vb=cv.parentElement&&cv.parentElement.querySelector("#jViews"); if(vb) vb.querySelectorAll("[data-view]").forEach(x=>x.className=""); }
       render(); });
     const end=e=>{
-      if(drag && !drag.pan && tool && onPickCb && drag.moved<6){  // a plain click (not a pan/drag) → pick
+      if(drag&&drag.select&&tool&&onPickCb){ const r=cv.getBoundingClientRect();
+        const p=screenSelect(drag.sx-r.left,drag.sy-r.top,e.clientX-r.left,e.clientY-r.top,tool==="retain-circle"?"circle":"box");
+        const s=shapeEl(); if(s) s.style.display="none"; if(p) onPickCb(tool,p); }
+      else if(drag && !drag.pan && tool && onPickCb && drag.moved<6){  // a plain click (not a pan/drag) → pick
         const r=cv.getBoundingClientRect(); const p=pickAt(drag.sx-r.left, drag.sy-r.top);
         if(p) onPickCb(tool, p);
       }
       drag=null;
     };
-    cv.addEventListener("pointerup",end); cv.addEventListener("pointercancel",end);
+    cv.addEventListener("pointerup",end); cv.addEventListener("pointercancel",()=>{ const s=shapeEl(); if(s)s.style.display="none"; drag=null; });
     cv.addEventListener("contextmenu",e=>e.preventDefault());
     cv.addEventListener("wheel",e=>{ e.preventDefault(); dist*=Math.exp(e.deltaY*0.0012);
       dist=Math.max(radius*0.25,Math.min(radius*40,dist)); render(); },{passive:false});
     mounted=true; return true;
   }
-  function parseSTL(buf){
+  function parseSTL(buf,creaseDeg){
     const dv=new DataView(buf); const n=dv.getUint32(80,true);
     if(84+n*50>buf.byteLength) throw new Error("bad STL");
     const v=new Float32Array(n*18); let o=84,p=0;
+    const faceN=new Float32Array(n*4), flatN=new Float32Array(n*3); // raw shading weights + pick normals
     const bb=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
     for(let i=0;i<n;i++){ o+=12; const t=[];
       for(let k=0;k<3;k++){ const x=dv.getFloat32(o,true),y=dv.getFloat32(o+4,true),z=dv.getFloat32(o+8,true); o+=12; t.push(x,y,z);
         if(x<bb[0])bb[0]=x; if(y<bb[1])bb[1]=y; if(z<bb[2])bb[2]=z; if(x>bb[3])bb[3]=x; if(y>bb[4])bb[4]=y; if(z>bb[5])bb[5]=z; }
       o+=2;
       const ux=t[3]-t[0],uy=t[4]-t[1],uz=t[5]-t[2], wx=t[6]-t[0],wy=t[7]-t[1],wz=t[8]-t[2];
-      let nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx; const l=Math.hypot(nx,ny,nz)||1; nx/=l;ny/=l;nz/=l;
+      let nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx; const rawLen=Math.hypot(nx,ny,nz);
+      const fn=i*4; faceN[fn]=nx; faceN[fn+1]=ny; faceN[fn+2]=nz; faceN[fn+3]=rawLen;
+      const l=rawLen||1; nx/=l;ny/=l;nz/=l;
+      const pn=i*3; flatN[pn]=nx; flatN[pn+1]=ny; flatN[pn+2]=nz;
       for(let k=0;k<3;k++){ v[p++]=t[k*3];v[p++]=t[k*3+1];v[p++]=t[k*3+2]; v[p++]=nx;v[p++]=ny;v[p++]=nz; } }
-    return {v,n,bb};
+    // STL stores one flat normal per triangle. Texture tessellation can therefore make
+    // sampling triangles read as facets. Weld coincident corners for shading only, then
+    // area-average incident faces that fall within the requested crease. Positions and
+    // triangle order in `v` stay exact, so ray picking and retained-face ids do not move.
+    const span=Math.max(bb[3]-bb[0],bb[4]-bb[1],bb[5]-bb[2])||1;
+    const weldTol=Math.max(span*1e-6,1e-7), cosCrease=Math.cos((+creaseDeg||40)*Math.PI/180);
+    const cornerGroup=new Int32Array(n*3), weld=new Map(), groups=[];
+    for(let i=0;i<n;i++) for(let k=0;k<3;k++){ const ci=i*3+k,vo=ci*6;
+      const key=Math.round((v[vo]-bb[0])/weldTol)+":"+Math.round((v[vo+1]-bb[1])/weldTol)+":"+Math.round((v[vo+2]-bb[2])/weldTol);
+      let gi=weld.get(key); if(gi===undefined){ gi=groups.length; weld.set(key,gi); groups.push([]); }
+      cornerGroup[ci]=gi; groups[gi].push(i);
+    }
+    for(let i=0;i<n;i++) for(let k=0;k<3;k++){ const ci=i*3+k,vo=ci*6;
+      const bx=v[vo+3],by=v[vo+4],bz=v[vo+5]; let sx=0,sy=0,sz=0;
+      const faces=groups[cornerGroup[ci]];
+      for(let q=0;q<faces.length;q++){ const fo=faces[q]*4,len=faceN[fo+3]; if(!len) continue;
+        if((bx*faceN[fo]+by*faceN[fo+1]+bz*faceN[fo+2])/len>=cosCrease){
+          sx+=faceN[fo]; sy+=faceN[fo+1]; sz+=faceN[fo+2]; }
+      }
+      const sl=Math.hypot(sx,sy,sz); if(sl){ v[vo+3]=sx/sl; v[vo+4]=sy/sl; v[vo+5]=sz/sl; }
+    }
+    return {v,n,bb,flatN};
   }
-  async function show(url,hex){
+  async function show(url,hex,creaseDeg){
     if(!gl){ return; }
+    creaseDeg=Number.isFinite(+creaseDeg)?+creaseDeg:40;
     color = hexRGB(hex);
     const mx=Math.max(color[0],color[1],color[2]);        // lift very dark styles so geometry stays legible
     if(mx<0.55){ const s=0.55/(mx||1e-3); color=[Math.min(1,color[0]*s),Math.min(1,color[1]*s),Math.min(1,color[2]*s)]; }
-    if(url!==url0){                                        // (re)load geometry only when it changes
-      url0=url; const myUrl=url, myGl=gl;
+    if(url!==url0||creaseDeg!==crease0){                   // normals depend on the shading crease
+      url0=url; crease0=creaseDeg; const myUrl=url, myGl=gl, myCrease=creaseDeg;
       try{ const r=await fetch(url); const buf=await r.arrayBuffer();
-        if(url0!==myUrl || gl!==myGl) return;              // a newer load / job switch superseded this
-        const g=parseSTL(buf);
-        nTris=g.n; geomV=g.v; gl.bindBuffer(gl.ARRAY_BUFFER,vbo); gl.bufferData(gl.ARRAY_BUFFER,g.v,gl.STATIC_DRAW);
+        if(url0!==myUrl || gl!==myGl || crease0!==myCrease) return; // newer load / shading mode won
+        const g=parseSTL(buf,myCrease);
+        nTris=g.n; geomV=g.v; pickN=g.flatN; gl.bindBuffer(gl.ARRAY_BUFFER,vbo); gl.bufferData(gl.ARRAY_BUFFER,g.v,gl.STATIC_DRAW);
         center=[(g.bb[0]+g.bb[3])/2,(g.bb[1]+g.bb[4])/2,(g.bb[2]+g.bb[5])/2];
         bmin=[g.bb[0],g.bb[1],g.bb[2]]; bdim=[g.bb[3]-g.bb[0]||1,g.bb[4]-g.bb[1]||1,g.bb[5]-g.bb[2]||1];
         radius=0.5*Math.hypot(g.bb[3]-g.bb[0],g.bb[4]-g.bb[1],g.bb[5]-g.bb[2])||1;
-        tgt=center.slice(); dist=radius*2.6; az=-2.15; el=0.5;
+        tgt=center.slice(); dist=radius*2.6; az=-Math.PI/4; el=Math.atan(1/Math.sqrt(2));
         buildHi();                                         // re-project cached regions onto the new mesh's bbox
-      }catch(e){ if(url0===myUrl) nTris=0; }
+      }catch(e){ if(url0===myUrl&&gl===myGl&&crease0===myCrease) nTris=0; }
     }
     resize();
   }
@@ -1436,11 +1920,37 @@ const GLV = (function(){
     if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
     render();
   }
+  function renderAxis(){
+    if(!cv||!cv.parentElement) return;
+    const svg=cv.parentElement.querySelector("#jAxis"); if(!svg) return;
+    const e=eye();
+    let back=[e[0]-tgt[0],e[1]-tgt[1],e[2]-tgt[2]];
+    const bl=Math.hypot(...back)||1; back=back.map(v=>v/bl);
+    let right=[-back[1],back[0],0]; const rh=Math.hypot(...right);
+    right=rh<1e-5?[1,0,0]:right.map(v=>v/rh);
+    const up=[back[1]*right[2]-back[2]*right[1],
+              back[2]*right[0]-back[0]*right[2],
+              back[0]*right[1]-back[1]*right[0]];
+    const axes=[[1,0,0,"X"],[0,1,0,"Y"],[0,0,1,"Z"]], ox=47,oy=45,L=27;
+    axes.forEach(a=>{
+      const sx=a[0]*right[0]+a[1]*right[1]+a[2]*right[2];
+      const sy=-(a[0]*up[0]+a[1]*up[1]+a[2]*up[2]);
+      const ex=ox+sx*L,ey=oy+sy*L,nx=ox-sx*L*.55,ny=oy-sy*L*.55,k=a[3];
+      const pos=svg.querySelector("#jAxis"+k),neg=svg.querySelector("#jAxis"+k+"n");
+      const dot=svg.querySelector("#jAxis"+k+"d"),txt=svg.querySelector("#jAxis"+k+"t");
+      [[pos,"x1",ox],[pos,"y1",oy],[pos,"x2",ex],[pos,"y2",ey],
+       [neg,"x1",ox],[neg,"y1",oy],[neg,"x2",nx],[neg,"y2",ny],
+       [dot,"cx",ex],[dot,"cy",ey],[txt,"x",ex+(sx>=0?4:-16)],[txt,"y",ey+(sy>=0?11:-4)]]
+        .forEach(v=>v[0]&&v[0].setAttribute(v[1],v[2].toFixed?v[2].toFixed(1):v[2]));
+    });
+  }
   function render(){
+    renderAxis();
     if(!gl||!cv||!nTris) { if(gl){gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);} return; }
     gl.viewport(0,0,cv.width,cv.height); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     const e=eye(), asp=cv.width/cv.height||1;
-    const mvp=mul(persp(0.82,asp,Math.max(radius*0.02,0.01),radius*60), look(e,tgt,[0,0,1]));
+    const cameraUp=Math.abs(Math.cos(el))<1e-4?[0,1,0]:[0,0,1];
+    const mvp=mul(persp(0.82,asp,Math.max(radius*0.02,0.01),radius*60), look(e,tgt,cameraUp));
     lastMVP=mvp;                                          // kept for click-picking (unproject)
     gl.useProgram(prog);
     gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
@@ -1462,11 +1972,10 @@ const GLV = (function(){
       gl.disable(gl.POLYGON_OFFSET_FILL); gl.depthMask(true); gl.disable(gl.BLEND);
     }
   }
-  const HI_COLOR={solid:[1,.55,.15],preserve:[.3,.7,1],void:[1,.28,.28]};
+  const HI_COLOR={solid:[1,.55,.15],preserve:[.3,.7,1],void:[1,.28,.28],load:[1,.22,.05]};
   function buildHi(){                                     // normalized region tris → world overlay buffer
     hRanges=[]; hCount=0;
     if(!gl||!nTris){ return; }
-    if(!hbo) hbo=gl.createBuffer();
     const arr=[];
     (hiRegions||[]).forEach(r=>{ if(!r||!r.tris||!r.tris.length) return;
       const start=hCount;
@@ -1474,21 +1983,32 @@ const GLV = (function(){
         arr.push(bmin[0]+t[k*3]*bdim[0], bmin[1]+t[k*3+1]*bdim[1], bmin[2]+t[k*3+2]*bdim[2], 0,0,0); } });
       hCount+=r.tris.length; hRanges.push({start, count:r.tris.length, color:HI_COLOR[r.rule]||HI_COLOR.solid});
     });
+    if(!arr.length) return;                               // do not disturb the mesh VBO for no overlay
+    if(!hbo) hbo=gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER,hbo); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(arr),gl.DYNAMIC_DRAW);
   }
   function setHighlight(regions){ hiRegions=regions||[]; buildHi(); render(); }
   function hide(){                                        // only abandon a DETACHED canvas (job
     if(gl && cv && !cv.isConnected){                       // switch); a same-job toggle keeps its
       const ex=gl.getExtension("WEBGL_lose_context"); if(ex) ex.loseContext();  // live context so
-      gl=null; cv=null; mounted=false; url0=null; nTris=0;                      // re-open reuses it
+      gl=null; cv=null; mounted=false; url0=null; crease0=null; nTris=0;        // re-open reuses it
       hbo=null; hRanges=[]; hCount=0;
     }
   }
   function hexRGB(h){ h=(h||"").replace("#",""); if(h.length!==6) return [.48,.65,.79];
     return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255]; }
-  function setTool(t){ tool=t||null; if(cv) cv.style.cursor = tool?"crosshair":"grab"; }
+  function setView(name){
+    const iso=Math.atan(1/Math.sqrt(2));
+    const views={front:[-Math.PI/2,0],back:[Math.PI/2,0],left:[Math.PI,0],right:[0,0],
+      top:[-Math.PI/2,Math.PI/2],bottom:[-Math.PI/2,-Math.PI/2],iso:[-Math.PI/4,iso],"iso-back":[3*Math.PI/4,iso]};
+    if(views[name]) [az,el]=views[name];
+    tgt=center.slice(); dist=radius*2.6; render();
+  }
+  function setTool(t){ tool=t||null; if(cv){ cv.style.cursor=tool?"crosshair":"grab";
+      const s=cv.parentElement&&cv.parentElement.querySelector("#jSelectShape"); if(s&&!/^retain-/.test(tool||"")) s.style.display="none"; } }
+  function setRetainOp(op){ retainOp=op==="remove"?"remove":"add"; }
   function onPick(cb){ onPickCb=cb; }
-  return { mount, show, resize, hide, setTool, onPick, setHighlight };
+  return { mount, show, resize, hide, setTool, setRetainOp, setView, onPick, setHighlight };
 })();
 
 /* ---------- DOCK: recipe + metrics + log ---------- */
@@ -1507,6 +2027,7 @@ function renderDock(kind){
     S.dockKey=key; renderRecipe(j);
   }
   $("#dMetrics").innerHTML=metricsHtml;
+  const se=$("#dStructuralize"); if(se) se.onclick=()=>openStructuralEditor(j,shown,se);
   const lg=$("#dLog"); if(lg){ const atEnd=lg.scrollTop+lg.clientHeight>=lg.scrollHeight-8;
     lg.textContent=(j.log||[]).join("\n"); if(atEnd) lg.scrollTop=lg.scrollHeight; }
 }
@@ -1518,27 +2039,62 @@ function metricsBlock(j,shown){
        '<div class="metric"><span>volume</span><b>'+(m.volume/1000).toFixed(2)+' cm³</b></div>'+
        '<div class="metric"><span>valid solid</span><b>'+(m.is_valid?"yes":"NO")+'</b></div>';
   } else if(m){
+    const texture=m.surface_texture;
     h+='<div class="metric"><span>compliance</span><b>'+(m.compliance!=null?(+m.compliance).toFixed(3):"—")+'</b></div>'+
-       '<div class="metric"><span>material kept</span><b>'+(m.vol_fraction!=null?Math.round(m.vol_fraction*100)+"%":"—")+'</b></div>'+
+       '<div class="metric"><span>total material</span><b>'+(m.vol_fraction!=null?Math.round(m.vol_fraction*100)+"%":"—")+'</b></div>'+
+       (m.mass_change_pct!=null?'<div class="metric"><span>mass change</span><b>'+(+m.mass_change_pct>=0?"+":"")+(+m.mass_change_pct).toFixed(2)+'%</b></div>':"")+
+       (m.mass_tolerance_pct!=null?'<div class="metric"><span>allowed mass change</span><b>±'+(+m.mass_tolerance_pct).toFixed(1)+'%</b></div>':"")+
+       (texture?'<div class="metric"><span>surface texture</span><b>'+esc(texture.mode+' '+texture.pattern+' · '+texture.height_mm+' mm · '+(texture.angle_deg||0)+'° · '+(texture.mapping||"legacy triplanar")+' · '+(texture.scope||"selected surface"))+'</b></div>':"")+
+       (m.design_vol_fraction!=null?'<div class="metric"><span>free-region material</span><b>'+Math.round(m.design_vol_fraction*100)+'%</b></div>':"")+
+       (m.load_cases!=null?'<div class="metric"><span>independent load cases</span><b>'+m.load_cases+'</b></div>':"")+
+       (m.surface_mode?'<div class="metric"><span>final surface</span><b>'+esc(m.surface_mode)+(m.selected_iteration!=null?' · iter '+m.selected_iteration:'')+'</b></div>':"")+
        (m.mesh_volume_mm3?'<div class="metric"><span>material</span><b>'+(m.mesh_volume_mm3/1000).toFixed(1)+' cm³</b></div>':"");
+    if(texture&&texture.sampling_limited){
+      const requested=+texture.sampling_edge_mm, effective=+texture.effective_sampling_edge_mm;
+      h+='<div class="materialwarn">Surface detail reached the export safety limit'+
+        (Number.isFinite(requested)&&Number.isFinite(effective)?': requested '+requested.toFixed(3)+' mm edges; used '+effective.toFixed(3)+' mm':'')+
+        '. Increase feature size or accept a larger STL to resolve it more finely.</div>';
+    }
   } else h+='<div class="hint">building…</div>';
   const fileHref = p => '/files/'+encodeURI(p).replace(/"/g,"%22");
   const links=[]; if(shown&&shown.step)links.push('<a href="'+fileHref(shown.step)+'">↓ STEP</a>');
   if(shown&&shown.stl)links.push('<a href="'+fileHref(shown.stl)+'">↓ STL</a>');
   if(shown&&shown.viewer)links.push('<a href="'+fileHref(shown.viewer)+'" target="_blank">↗ 3D viewer</a>');
   if(links.length) h+='<div class="links">'+links.join("")+'</div>';
-  if(shown&&shown.passed) h+='<div style="color:var(--ok);font-size:12.5px;margin-top:8px">✓ all requirements met</div>';
+  if(j.generator==="stack"&&j.state==="done"&&shown&&shown.step)
+    h+='<button class="btn warm" id="dStructuralize" style="margin-top:10px;width:100%">◲ Open in 3D + add loads →</button>';
+  const fullMaterial=j.generator==="structural"&&j.config&&j.config.revision_mode!=="form"&&+j.config.volfrac>=0.999;
+  if(fullMaterial) h+='<div class="materialwarn">100% material target — this result was required to keep the original amount of material, so no topology reduction occurred.</div>';
+  else if(shown&&shown.passed) h+='<div style="color:var(--ok);font-size:12.5px;margin-top:8px">✓ all requirements met</div>';
   return h;
 }
 
+/* Turn an exact parametric STEP into the unchanged structural baseline. The existing
+   local upload path already performs STEP→STL conversion and seeds editable loads. */
+async function openStructuralEditor(j,shown,btn){
+  const was=btn.textContent; btn.disabled=true; btn.textContent="⏳ preparing structural editor…";
+  try{
+    const src=await fetch('/files/'+encodeURI(shown.step));
+    if(!src.ok) throw new Error("could not read the generated STEP");
+    const body=await src.blob(), stem=(baseName(j.name)+"-loads").toLowerCase()
+      .replace(/[^a-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40)||"part-loads";
+    let proj=stem,n=2; while(S.jobs.some(x=>x.name===proj)) proj=(stem+"-r"+(n++)).slice(0,40);
+    const r=await fetch("/api/upload?name="+encodeURIComponent(j.name+".step")+
+      "&project="+encodeURIComponent(proj),
+      {method:"POST",headers:{"Content-Type":"application/octet-stream"},body});
+    const nj=await r.json(); if(!r.ok) throw new Error(nj.error||"structural conversion failed");
+    S.pendingJob=nj; S.jobs=mergeJobs([nj].concat(S.jobs));
+    S.expanded[nj.root||baseName(nj.name)]=true; selectJob(nj.id); renderChrome(); poll();
+  }catch(e){ btn.disabled=false; btn.textContent="✕ "+String(e.message||e).slice(0,42);
+    setTimeout(()=>{ btn.textContent=was; },3600); }
+}
+
 /* -------- recipe editor (LLM-free revision) -------- */
-const DIRS=[["[0,0,-1]","push down"],["[0,0,1]","pull up"],
-  ["[1,0,0]","push right"],["[-1,0,0]","push left"],["[0,1,0]","push back"],["[0,-1,0]","push front"]];
 function regionSentence(box){
   const ax=["x","y","z"],names=[];
   for(let i=0;i<3;i++){ const a=box[i],b=box[i+3];
-    if(b-a<=0.05){ if(a<=0.02)names.push({x:"the left face",y:"the front face",z:"the bottom face"}[ax[i]]);
-      else if(b>=0.98)names.push({x:"the right face",y:"the back face",z:"the top face"}[ax[i]]);
+    if(b-a<=0.05){ if(a<=0.02)names.push({x:"the left (−X) face",y:"the front (−Y) face",z:"the bottom (−Z) face"}[ax[i]]);
+      else if(b>=0.98)names.push({x:"the right (+X) face",y:"the back (+Y) face",z:"the top (+Z) face"}[ax[i]]);
       else names.push("mid "+ax[i]); }
     else if(a>0.02||b<0.98) names.push(ax[i]+" "+Math.round(a*100)+"–"+Math.round(b*100)+"%"); }
   return names.length?names.join(", "):"the whole body";
@@ -1548,9 +2104,9 @@ function box6(kind,idx,box,mode){ const order=[0,3,1,4,2,5],
   return '<div class="box6 '+(mode==="range"?"range":"")+'">'+order.map((oi,k)=>'<label>'+cells[k]+
     '<input type="number" min="0" max="100" value="'+Math.round(box[oi]*100)+'" data-r="'+kind+'-'+idx+'-'+oi+'"></label>').join("")+'</div>'; }
 /* direct manipulation: click a cube face to snap a support/load to canonical 0..1 box */
-const FACES=[["left","◧ left",[0,0,0,0.06,1,1]],["right","right ◨",[0.94,0,0,1,1,1]],
-  ["front","front",[0,0,0,1,0.06,1]],["back","back",[0,0.94,0,1,1,1]],
-  ["bottom","▼ bottom",[0,0,0,1,1,0.06]],["top","top ▲",[0,0,0.94,1,1,1]]];
+const FACES=[["left","◧ left (−X)",[0,0,0,0.06,1,1]],["right","right (+X) ◨",[0.94,0,0,1,1,1]],
+  ["front","front (−Y)",[0,0,0,1,0.06,1]],["back","back (+Y)",[0,0.94,0,1,1,1]],
+  ["bottom","▼ bottom (−Z)",[0,0,0,1,1,0.06]],["top","top (+Z) ▲",[0,0,0.94,1,1,1]]];
 function faceOf(box){ for(const f of FACES){ if(f[2].every((v,i)=>Math.abs(v-box[i])<0.02)) return f[0]; } return null; }
 function facePicker(kind,idx,box){
   const cur=faceOf(box);
@@ -1567,9 +2123,58 @@ function wireFaces(){
     });
   });
 }
+function syncLoadsFromDOM(){
+  const g=s=>$('[data-r="'+s+'"]');
+  (S.editLoads||[]).forEach((l,i)=>{
+    for(let o=0;o<6;o++){ const e=g("load-"+i+"-"+o); if(e) l.box[o]=Math.max(0,Math.min(1,+e.value/100)); }
+    const d=[0,1,2].map(a=>{ const e=g("loadvec-"+i+"-"+a); return e?+e.value:l.dir[a]; });
+    if(d.every(Number.isFinite)&&Math.hypot(...d)>1e-9) l.dir=d;
+  });
+}
+function renderLoads(){
+  const box=$("#rLoads"); if(!box) return;
+  const loads=S.editLoads||[];
+  box.innerHTML=loads.length?loads.map((l,i)=>{
+    const d=(l.dir&&l.dir.length===3?l.dir:[0,0,-1]);
+    const vec='<span class="vec3">F = ['+[0,1,2].map(a=>'<span class="axis-tag axis-'+"xyz"[a]+'">'+"XYZ"[a]+'</span>'+
+      '<input type="number" step="any" value="'+escAttr(d[a])+'" data-r="loadvec-'+i+'-'+a+'" aria-label="load '+"xyz"[a]+'">').join("")+
+      ']</span> <span class="vecmeaning" data-vmean="'+i+'">'+esc(vectorMeaning(d))+'</span>';
+    const rm='<button type="button" class="regx" data-rmload="'+i+'" title="remove load">✕</button>';
+    return '<div class="sen">⬇ <b style="color:var(--ink)">Load:</b> '+regionSentence(l.box)+' · '+vec+rm+'</div>'+
+      '<div class="bcnote">X/Y/Z are direction ratios, not force magnitude. [0,0,−1], [0,0,−100], and [0,0,−1000] are identical. Negating every component reverses the direction; changing their relative ratios changes the angle.</div>'+
+      (l.tris?'<div class="sen">🔺 exact 3D face patch · '+l.tris.length+' tris</div>':facePicker("load",i,l.box)+box6("load",i,l.box,"range"));
+  }).join(""):'<div class="hint" style="padding:2px 0 0">none — add one with the 3D load tool or recipe.</div>';
+  box.querySelectorAll("[data-rmload]").forEach(b=>b.onclick=()=>{
+    syncLoadsFromDOM(); S.editLoads.splice(+b.dataset.rmload,1); renderLoads(); wireFaces();
+    if(S.gl3d) GLV.setHighlight(pickHighlights()); });
+  box.querySelectorAll('[data-r^="loadvec-"]').forEach(inp=>inp.oninput=()=>{
+    const p=inp.dataset.r.split("-"),i=+p[1];
+    const d=[0,1,2].map(a=>{const e=box.querySelector('[data-r="loadvec-'+i+'-'+a+'"]');return e?+e.value:0;});
+    const out=box.querySelector('[data-vmean="'+i+'"]'); if(out) out.textContent=vectorMeaning(d);
+  });
+  wireFaces();
+}
 /* Phase 2: keep-regions — pin surfaces (solid / preserve-flat / clear) while the rest
    optimizes. Edited in a live list (S.editRegions), reusing the face-picker + box6 UI. */
-const REGION_RULES=[["solid","🧱 keep solid"],["preserve","📐 preserve (flat)"],["void","⬛ keep clear"]];
+const REGION_RULES=[["solid","🧱 keep solid"],["preserve","▣ retain surface"],["void","⬛ keep clear"]];
+const SURFACE_TEXTURES=[["honeycomb","Honeycomb"],["diamond","Diamond knurl"],["ribs","Parallel ribs"],
+  ["dimples","Round dimples"],["waves","Flowing waves"],["pebbled","Pebbled grip"],
+  ["checker","Checker plate"],["chevron","Chevron tread"],["crosshatch","Crosshatch grip"],
+  ["basket","Basket weave"],["brick","Brickwork"],["scales","Overlapping scales"],
+  ["rings","Concentric rings"],["starburst","Radial starburst"],["grid","Raised grid"],
+  ["triangles","Triangular lattice"],["woodgrain","Wood grain"],["stipple","Fine stipple"],
+  ["voronoi","Voronoi cells"],["topo","Topographic contours"],["herringbone","Herringbone"],
+  ["tread","Tire tread"],["carbon","Carbon-fiber weave"],["hammered","Hammered metal"],
+  ["leather","Leather grain"],["bark","Tree bark"],["sandstone","Sandstone"],
+  ["droplets","Water droplets"],["guilloche","Guilloché waves"],["circuit","Circuit traces"],
+  ["leopard","Leopard print"]];
+const TEXTURE_VIEW_MAPPING={front:"front",back:"front",left:"side",right:"side",top:"top",bottom:"top"};
+const TEXTURE_MAPPING_LABELS={wrap:"whole exterior → seamless wrap around Z with planar caps",
+  front:"Front/Back-facing surfaces → X–Z projection",side:"Left/Right-facing surfaces → Y–Z projection",
+  top:"Top/Bottom-facing surfaces → X–Y projection",triplanar:"whole exterior → legacy triplanar projection"};
+function resolvedTextureMapping(choice){ return choice==="view"?(TEXTURE_VIEW_MAPPING[S.textureView]||"wrap"):choice; }
+function updateTextureViewState(){ const select=$('[data-r="texture_mapping"]'), note=$("#rTextureViewState");
+  if(note&&select){ const mapping=resolvedTextureMapping(select.value); note.textContent="Pending mapping: "+(TEXTURE_MAPPING_LABELS[mapping]||mapping)+"."; } }
 function syncRegionsFromDOM(){                          // pull current inputs into S.editRegions
   const g=s=>$('[data-r="'+s+'"]');
   (S.editRegions||[]).forEach((r,i)=>{
@@ -1580,17 +2185,20 @@ function syncRegionsFromDOM(){                          // pull current inputs i
 function renderRegions(){
   const box=$("#rRegions"); if(!box) return;
   const regs=S.editRegions||[];
-  box.innerHTML = regs.length ? regs.map((r,i)=>{
+  const rows=regs.map((r,i)=>{
     const opts=REGION_RULES.map(([v,lab])=>'<option value="'+v+'"'+(r.rule===v?" selected":"")+'>'+lab+'</option>').join("");
     const sel='<select data-r="regrule-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select> ';
     const rm='<button type="button" class="regx" data-rmreg="'+i+'" title="remove">✕</button>';
     if(r.tris&&r.tris.length)                             // per-face patch: precise, not box-editable
-      return '<div class="sen">'+sel+'🔺 picked face · '+r.tris.length+' tris'+rm+'</div>';
+      return '<div class="sen">'+sel+'selected surface region · '+r.tris.length+' tris'+rm+'</div>';
     return '<div class="sen">'+sel+regionSentence(r.box)+rm+'</div>'+facePicker("reg",i,r.box)+box6("reg",i,r.box);
-  }).join("") : '<div class="hint" style="padding:2px 0 0">none — the whole body optimizes freely.</div>';
+  }).join("");
+  box.innerHTML = !regs.length ? '<div class="hint" style="padding:2px 0 0">none — the whole body optimizes freely.</div>'
+    : regs.length>6 ? '<details class="reglist"><summary>'+regs.length+' retained surface regions · expand to edit</summary>'+rows+'</details>'
+    : rows;
   box.querySelectorAll("[data-rmreg]").forEach(b=>b.onclick=()=>{
-    syncRegionsFromDOM(); S.editRegions.splice(+b.dataset.rmreg,1); renderRegions(); wireFaces();
-    if(S.gl3d) GLV.setHighlight(S.editRegions); });
+    syncRegionsFromDOM(); rememberRegions(); S.editRegions.splice(+b.dataset.rmreg,1); renderRegions(); wireFaces();
+    if(S.gl3d) GLV.setHighlight(pickHighlights()); });
   wireFaces();
 }
 /* progressive disclosure: plain-language labels + primary/fine grouping for parametric */
@@ -1614,28 +2222,62 @@ function renderRecipe(j){
   if(S.styles&&S.styles.styles) h+='<div class="grp">Style — restyle & re-run (no LLM)</div><div id="rStyleMap"></div>';
   if(cfg.engine==="structural"){
     const ckey=cfg.creativity||j.creativity||"focused";
+    const canForm=!!cfg.domain_stl;
+    const rmode=canForm&&(j.upload_baseline||cfg.revision_mode==="form")?"form":"structural";
+    const tex=cfg.surface_texture||{}, texPattern=tex.pattern||"none", texAngle=Number.isFinite(+tex.angle_deg)?+tex.angle_deg:0,
+      texMapping=tex.mapping||"wrap", texDetail=tex.detail||"fine";
     h+='<div class="rl"><span class="rk">design space</span><span class="rv">'+
        ["x","y","z"].map((a,i)=>'<input type="number" step="any" value="'+cfg.domain_mm[i]+'" data-r="dom-'+i+'">').join(" × ")+'</span></div>'+
-       '<div class="rl"><span class="rk">keep material</span><span class="rv"><input type="number" min="10" max="60" value="'+Math.round(cfg.volfrac*100)+'" data-r="volfrac"> %</span></div>'+
+       '<div class="rl"><span class="rk">revision goal</span><span class="rv"><select data-r="revision_mode" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+         (canForm?'<option value="form"'+(rmode==="form"?" selected":"")+'>form · preserve mass</option>':"")+
+         '<option value="structural"'+(rmode==="structural"?" selected":"")+'>structural · load paths</option></select></span></div>'+
+       '<div id="rStructuralGoal"'+(rmode==="structural"?"":' style="display:none"')+'>'+
+         '<div class="rl"><span class="rk">keep material</span><span class="rv"><input type="number" min="10" max="100" value="'+Math.round(cfg.volfrac*100)+'" data-r="volfrac"> %</span></div>'+
+         '<div id="rVolNote"></div>'+
+       '</div>'+
+       '<div id="rFormGoal"'+(rmode==="form"?"":' style="display:none"')+'>'+
+         '<div class="rl"><span class="rk">reference mass</span><span class="rv">100% · uploaded solid</span></div>'+
+         '<div class="rl"><span class="rk">mass tolerance</span><span class="rv">± <input type="number" min="0" max="25" step="0.1" value="'+(cfg.mass_tolerance_pct??2)+'" data-r="mass_tolerance_pct"> %</span></div>'+
+         '<div class="rl"><span class="rk">form algorithm</span><span class="rv"><select data-r="form_operation" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+           [["relax","gentle relax"],["smooth","smooth"],["polish","polish"],["facet","retain facets"]].map(o=>'<option value="'+o[0]+'"'+((cfg.form_operation||"facet")===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
+         '<div class="grp">Surface texture <span class="hint" style="font-weight:400">— whole exterior or retained mask</span></div>'+
+         '<div class="rl"><span class="rk">pattern</span><span class="rv"><select data-r="texture_pattern" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+           '<option value="none"'+(texPattern==="none"?' selected':'')+'>none</option>'+SURFACE_TEXTURES.map(o=>'<option value="'+o[0]+'"'+(texPattern===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
+         '<div id="rTextureFields"'+(texPattern==="none"?' style="display:none"':'')+'>'+
+           '<div class="texture-preview" id="rTexturePreview" data-pattern="'+escAttr(texPattern)+'" style="--texture-angle:'+texAngle+'deg"></div>'+
+           '<div class="rl"><span class="rk">mapping</span><span class="rv"><select data-r="texture_mapping" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+             [["wrap","whole exterior · seamless wrap"],["view","current standard view · facing surfaces"],["front","front/back-facing · X–Z"],
+              ["side","left/right-facing · Y–Z"],["top","top/bottom-facing · X–Y"],["triplanar","whole exterior · triplanar"]].map(o=>'<option value="'+o[0]+'"'+(texMapping===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
+           '<div class="rl"><span class="rk">relief</span><span class="rv"><select data-r="texture_mode" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+             [["emboss","emboss · raised"],["deboss","deboss · recessed"]].map(o=>'<option value="'+o[0]+'"'+((tex.mode||"emboss")===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
+           '<div class="rl"><span class="rk">height</span><span class="rv"><input type="number" min="0.05" max="5" step="0.05" value="'+(tex.height_mm??0.6)+'" data-r="texture_height"> mm</span></div>'+
+           '<div class="rl"><span class="rk" id="rTextureScaleLabel">'+(texPattern==="leopard"?"feature size":"repeat size")+'</span><span class="rv"><input type="number" min="1" max="100" step="0.5" value="'+(tex.scale_mm??8)+'" data-r="texture_scale"> mm</span></div>'+
+           '<div class="rl"><span class="rk">orientation</span><span class="rv"><input type="number" min="-180" max="180" step="1" value="'+texAngle+'" data-r="texture_angle"> °</span></div>'+
+           '<div class="rl"><span class="rk">surface detail</span><span class="rv"><select data-r="texture_detail" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
+             [["balanced","balanced"],["fine","fine · default"],["ultra","ultra · larger STL"]].map(o=>'<option value="'+o[0]+'"'+(texDetail===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
+           '<div class="bcnote">Fine and ultra add triangles before relief is applied, so curved vector edges stay smooth when viewed close up. A safety cap still prevents unbounded exports.</div>'+
+         '</div>'+
+         '<div class="bcnote" id="rTextureViewState"></div>'+
+         '<div class="bcnote"><b>Whole exterior</b> wraps continuously around Z and maps horizontal caps in X–Y. Planar view mappings affect only surfaces facing that view pair and fade before turning a corner, preventing spots from stretching into side-wall stripes. Draw <b>retain surface</b> regions only for a limited mask.</div>'+
+         '<div class="bcnote" id="rFormNote">No load case is required. Assuming the same material and density, the surface operation stops at the allowed volume/mass deviation.</div>'+
+       '</div>'+
+       '<div id="rStructuralOptions"'+(rmode==="structural"?"":' style="display:none"')+'>'+
        '<div class="rl"><span class="rk">quality</span><span class="rv"><select data-r="quality" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          ['draft','balanced','fine','ultra'].map(q=>'<option value="'+q+'"'+((cfg.quality||"draft")===q?" selected":"")+'>'+q+'</option>').join("")+'</select></span></div>'+
        '<div class="rl"><span class="rk">creativity</span><span class="rv"><select data-r="creativity" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          [['focused','Focused'],['explore','Explore'],['wild','Wild']].map(o=>'<option value="'+o[0]+'"'+(ckey===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select></span></div>'+
        '<div class="rl"><span class="rk">mesh detail</span><span class="rv"><select data-r="mesh_detail" style="width:auto;display:inline-block;font-size:11px;padding:2px 5px">'+
          [[1,'coarse'],[2,'smooth'],[3,'fine']].map(o=>'<option value="'+o[0]+'"'+((+cfg.mesh_detail||2)===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select> <span class="hint">surface only</span></span></div>'+
-       (cfg.seed!=null?'<div class="rl"><span class="rk">seed</span><span class="rv">'+esc(cfg.seed)+(cfg.variant_label?" · "+esc(cfg.variant_label):"")+'</span></div>':'');
+       (cfg.seed!=null?'<div class="rl"><span class="rk">seed</span><span class="rv">'+esc(cfg.seed)+(cfg.variant_label?" · "+esc(cfg.variant_label):"")+'</span></div>':'')+
+       '</div>';
+    h+='<div id="rStructuralBC"'+(rmode==="structural"?"":' style="display:none"')+'>';
     if((cfg.supports||[]).length) h+='<div class="grp">Anchored area <span class="hint" style="font-weight:400">— bolted, clamped, or touching ground</span></div>';
     (cfg.supports||[]).forEach((s,i)=>{ h+='<div class="sen">🔒 <b style="color:var(--ink)">Held still:</b> '+regionSentence(s.box)+'</div>'+
       '<div class="bcnote">This is where the part cannot move; loads must travel back to this area.</div>'+
       facePicker("sup",i,s.box)+box6("sup",i,s.box,"range"); });
-    if((cfg.loads||[]).length) h+='<div class="grp">Force applied <span class="hint" style="font-weight:400">— where the part is pushed or pulled</span></div>';
-    (cfg.loads||[]).forEach((l,i)=>{ const dv=JSON.stringify(l.dir.map(v=>Math.round(v*100)/100));
-      const opts=DIRS.map(([v,lab])=>'<option value=\''+v+'\' '+(v===dv?"selected":"")+'>'+lab+'</option>').join("")+
-        (DIRS.some(([v])=>v===dv)?"":'<option value=\''+dv+'\' selected>custom</option>');
-      h+='<div class="sen">⬇ <b style="color:var(--ink)">Force:</b> '+regionSentence(l.box)+' <select data-r="dir-'+i+'" style="width:auto;display:inline-block;font-size:11px;padding:2px 4px">'+opts+'</select></div>'+
-        '<div class="bcnote">This marks the contact patch for weight, pressure, pull, or impact.</div>'+
-        facePicker("load",i,l.box)+box6("load",i,l.box,"range"); });
-    h+='<div class="grp">Keep regions <span class="hint" style="font-weight:400">— pin surfaces while the rest optimizes</span></div>'+
+    h+='<div class="grp">Force applied <span class="hint" style="font-weight:400">— face + unitless XYZ direction</span></div>'+
+       '<div id="rLoads"></div></div>';
+    h+='<div class="grp">Keep regions <span class="hint" style="font-weight:400">— '+(rmode==="form"?"protect surfaces while the rest is refined":"pin surfaces while the rest optimizes")+'</span></div>'+
        '<div id="rRegions"></div>'+
        '<button type="button" class="ghost" id="rAddReg" style="margin-top:6px;font-size:11px;padding:4px 9px">+ add keep region</button>';
   } else if(cfg.template){
@@ -1652,14 +2294,44 @@ function renderRecipe(j){
   wrap.innerHTML=h;
   $("#dRev").onclick=runRevision;
   wireFaces();
+  const vf=$('[data-r="volfrac"]'), rmode=$('[data-r="revision_mode"]');
+  const materialGuard=()=>{
+    const mode=rmode?rmode.value:"structural", note=$("#rVolNote"), btn=$("#dRev"), pct=vf?+vf.value:0;
+    const blocked=mode==="structural"&&(!Number.isFinite(pct)||pct>=100);
+    const sg=$("#rStructuralGoal"), fg=$("#rFormGoal"), bc=$("#rStructuralBC"), so=$("#rStructuralOptions");
+    if(sg) sg.style.display=mode==="structural"?"":"none";
+    if(fg) fg.style.display=mode==="form"?"":"none";
+    if(bc) bc.style.display=mode==="structural"?"":"none";
+    if(so) so.style.display=mode==="structural"?"":"none";
+    if(note) note.innerHTML=blocked?'<div class="materialwarn"><b>100% means no optimization.</b> Lower the target before running a revision. <button type="button" class="ghost" id="rVolQuick">use 35%</button></div>'
+      :'<div class="bcnote">The optimizer may remove material until about '+Math.round(pct)+'% remains; kept regions stay protected.</div>';
+    if(btn) btn.disabled=blocked;
+    if(btn) btn.textContent=mode==="form"?"Run mass-constrained revision →":revisionRunLabel(($('[data-r="creativity"]')||{}).value||"focused");
+    const q=$("#rVolQuick"); if(q) q.onclick=()=>{ vf.value=35; materialGuard(); };
+  };
+  if(vf){ vf.oninput=materialGuard; materialGuard(); }
+  if(rmode) rmode.onchange=()=>{ const e=$("#dRevErr"); if(e) e.textContent=""; materialGuard(); };
   const cr=$('[data-r="creativity"]');
-  if(cr) cr.onchange=()=>{ $("#dRev").textContent=revisionRunLabel(cr.value); };
+  if(cr) cr.onchange=materialGuard;
+  const tp=$('[data-r="texture_pattern"]'), ta=$('[data-r="texture_angle"]'), tm=$('[data-r="texture_mapping"]');
+  const updateTexturePreview=()=>{ const fields=$("#rTextureFields"), preview=$("#rTexturePreview"), scaleLabel=$("#rTextureScaleLabel");
+    if(fields&&tp) fields.style.display=tp.value==="none"?"none":"";
+    if(preview&&tp) preview.dataset.pattern=tp.value;
+    if(scaleLabel&&tp) scaleLabel.textContent=tp.value==="leopard"?"feature size":"repeat size";
+    if(preview&&ta) preview.style.setProperty("--texture-angle",(+ta.value||0)+"deg"); };
+  if(tp) tp.onchange=updateTexturePreview;
+  if(ta) ta.oninput=updateTexturePreview;
+  if(tm) tm.onchange=updateTextureViewState;
+  updateTextureViewState();
   if(cfg.engine==="structural"){                         // Phase 2 keep-regions live list
+    S.editLoads=(cfg.loads||[]).map(l=>{ const o={box:(l.box||[0.94,0,0,1,1,1]).slice(),dir:(l.dir||[0,0,-1]).slice()};
+      if(l.tris) o.tris=l.tris.map(t=>t.slice()); return o; });
+    renderLoads();
     S.editRegions=(cfg.regions||[]).map(r=>{ const o={box:(r.box||[0.94,0,0,1,1,1]).slice(),rule:r.rule};
       if(r.tris&&r.tris.length) o.tris=r.tris.map(t=>t.slice()); return o; });
-    renderRegions(); if(S.gl3d) GLV.setHighlight(S.editRegions);
+    renderRegions(); if(S.gl3d) GLV.setHighlight(pickHighlights());
     const ar=$("#rAddReg"); if(ar) ar.onclick=()=>{ syncRegionsFromDOM();
-      S.editRegions.push({box:[0.94,0,0,1,1,1],rule:"solid"}); renderRegions(); };
+      rememberRegions(); S.editRegions.push({box:[0.94,0,0,1,1,1],rule:"solid"}); renderRegions(); };
   }
   const sa=$("#showAll"); if(sa) sa.onclick=()=>{ const g=$("#fineGrp"), open=g.style.display!=="none";
     g.style.display=open?"none":""; sa.textContent = open?("+ show all "+sa.dataset.total+" fields ▾"):"▲ hide fine controls"; };
@@ -1670,16 +2342,44 @@ async function runRevision(){
   const j=selected(); if(!j||!j.config) return;
   const cfg=JSON.parse(JSON.stringify(j.config)); const g=s=>$('[data-r="'+s+'"]');
   if(cfg.engine==="structural"){
-    cfg.domain_mm=[0,1,2].map(i=>+g("dom-"+i).value); cfg.volfrac=+g("volfrac").value/100;
+    cfg.domain_mm=[0,1,2].map(i=>+g("dom-"+i).value);
+    cfg.revision_mode=(g("revision_mode")||{}).value||"structural";
+    cfg.volfrac=cfg.revision_mode==="form"?1:+g("volfrac").value/100;
+    cfg.mass_tolerance_pct=+(g("mass_tolerance_pct")||{value:2}).value;
+    cfg.form_operation=(g("form_operation")||{value:"facet"}).value;
+    const texturePattern=(g("texture_pattern")||{value:"none"}).value;
+    if(cfg.revision_mode==="form"&&(!Number.isFinite(cfg.mass_tolerance_pct)||cfg.mass_tolerance_pct<0||cfg.mass_tolerance_pct>25)){ $("#dRevErr").textContent="mass tolerance must be between 0% and 25%"; return; }
+    if(cfg.revision_mode==="structural"&&(!Number.isFinite(cfg.volfrac)||cfg.volfrac>=1)){ $("#dRevErr").textContent="100% keeps the whole part; choose a lower material target or use form · preserve mass"; return; }
     const qs=g("quality"); if(qs) cfg.quality=qs.value;
     const cs=g("creativity"); if(cs) cfg.creativity=cs.value;
     const mds=g("mesh_detail"); if(mds) cfg.mesh_detail=+mds.value;
     (cfg.supports||[]).forEach((s,i)=>{for(let o=0;o<6;o++){const e=g("sup-"+i+"-"+o); if(e)s.box[o]=+e.value/100;}});
-    (cfg.loads||[]).forEach((l,i)=>{for(let o=0;o<6;o++){const e=g("load-"+i+"-"+o); if(e)l.box[o]=+e.value/100;} l.dir=JSON.parse(g("dir-"+i).value);});
+    syncLoadsFromDOM();
+    cfg.loads=(S.editLoads||[]).map(l=>{ const o={box:l.box.slice(),dir:l.dir.slice()};
+      if(l.tris) o.tris=l.tris.map(t=>t.slice()); return o; });
+    if(cfg.revision_mode==="structural"&&!cfg.loads.length){ $("#dRevErr").textContent="structural load-path optimization needs at least one load; choose form · preserve mass to work without loads"; return; }
+    if(cfg.revision_mode==="form") cfg.loads=[];
     syncRegionsFromDOM();                                // Phase 2 keep-regions
     const regs=(S.editRegions||[]).filter(r=>(r.tris&&r.tris.length)||
       (r.box&&r.box[3]>r.box[0]&&r.box[4]>r.box[1]&&r.box[5]>r.box[2]));
+    const retainTriangles=regs.reduce((n,r)=>n+(r.tris?r.tris.length:0),0);
+    if(retainTriangles>250000){
+      $("#dRevErr").textContent="retained regions contain "+retainTriangles.toLocaleString()+" triangles; remove or narrow a region before running"; return;
+    }
     if(regs.length) cfg.regions=regs; else delete cfg.regions;
+    if(cfg.revision_mode==="form"&&texturePattern!=="none"){
+      const height=+(g("texture_height")||{}).value, scale=+(g("texture_scale")||{}).value,
+        angle=+(g("texture_angle")||{value:0}).value;
+      const mapping=resolvedTextureMapping((g("texture_mapping")||{value:"wrap"}).value);
+      const detail=(g("texture_detail")||{value:"fine"}).value;
+      if(!SURFACE_TEXTURES.some(t=>t[0]===texturePattern)){ $("#dRevErr").textContent="choose a valid surface texture"; return; }
+      if(!Number.isFinite(height)||height<.05||height>5){ $("#dRevErr").textContent="texture height must be between 0.05 mm and 5 mm"; return; }
+      if(!Number.isFinite(scale)||scale<1||scale>100){ $("#dRevErr").textContent="texture repeat size must be between 1 mm and 100 mm"; return; }
+      if(!Number.isFinite(angle)||angle< -180||angle>180){ $("#dRevErr").textContent="texture orientation must be between −180° and 180°"; return; }
+      if(!["balanced","fine","ultra"].includes(detail)){ $("#dRevErr").textContent="choose a valid surface detail"; return; }
+      cfg.surface_texture={pattern:texturePattern,mode:(g("texture_mode")||{value:"emboss"}).value,
+        height_mm:height,scale_mm:scale,angle_deg:angle,mapping,detail};
+    }else delete cfg.surface_texture;
   } else { for(const k of Object.keys(cfg.params)){const e=g("param-"+k); if(e)cfg.params[k]=+e.value;} }
   const rs=$("#dRecipe").dataset.style; if(rs) cfg.style=rs; else delete cfg.style;   // restyle (S2)
   $("#dRev").disabled=true; $("#dRevErr").textContent="";
@@ -1690,12 +2390,6 @@ async function runRevision(){
     S.expanded[nj.root||baseName(nj.name)]=true; selectJob(nj.id); renderChrome();
   }catch(e){ $("#dRev").disabled=false; $("#dRevErr").textContent=e.message; }
 }
-
-/* ---------------- tagline (tone as data) ---------------- */
-const LINES=["a bench you never leave.","the compute is the animation.","one recipe, seen at every depth.",
-  "the expensive step happens once.","nothing lies about the GPU.","edit the numbers, run a revision."];
-let li=0; if(!reduce) setInterval(()=>{ li=(li+1)%LINES.length; const t=$("#tag");
-  t.style.opacity=0; setTimeout(()=>{ t.textContent=LINES[li]; t.style.opacity=1; },260); }, 4200);
 
 loadStyles();
 poll();

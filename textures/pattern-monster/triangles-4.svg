@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 40">
+  <!-- Source: https://pattern.monster/triangles-4 · MIT · premium:no -->
+  <path fill="none" stroke="#000" stroke-width="3" stroke-linejoin="round" d="M0 30h20L10 50zm-10-20h20L0 30zm20 0h20L20 30zM0-10h20L10 10z"/>
+</svg>

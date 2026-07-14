@@ -91,7 +91,8 @@ All verified live (browser + real qwen fan-out). Backend: `QUALITY_PRESETS`
 (queues sibling structural jobs under parent root, config_in carries the concept →
 skips LLM, creativity=focused so no re-fan-out), `_clean_bc` shared validator.
 `run_structural_job` reads quality/seed from job or config_in; fan-out only for a
-fresh parent. topo.py: `seed`+`asymmetry` perturb the SIMP start (Axis 2). new_job
+fresh parent. topo.py: `seed`+`asymmetry` bias sensitivities while every solve still starts
+from the intact domain (Axis 2). new_job
 carries quality/creativity; public_job + session /run thread them. Frontend: gate
 has Quality+Creativity segmented controls (structural-only, honest variant-count ETA);
 tree is a variant gallery (labels from variant_label, compliance meta, ★ best sibling);
@@ -232,7 +233,11 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
 - **Phase 3 — upload → design domain.** `⤒ Upload part → redesign` in the rail → POST
   `/api/upload?name=&project=` (raw body). STL used directly; STEP converted via the build123d
   CAD venv (`convert_to_stl` = `export_stl(import_step(src))`). `stl_bounds` (stdlib) → domain_mm;
-  creates a structural job with a default cantilever load case + `domain_stl`.
+  creates a structural job with a provisional cantilever load case + `domain_stl`. The automatic
+  upload baseline is the unchanged converted source mesh at 100% material: it bypasses SIMP,
+  voxel remeshing, thresholding, and smoothing until the user identifies functional faces and
+  explicitly lowers the material budget on a revision. Balanced is retained as the first revision's
+  default quality. User-edited structural recipes accept material budgets through 100%.
   topo.py `read_stl` (binary+ascii, 2M-tri cap) + `voxelize_mesh` (numpy ray-parity, ~14ms on the
   test part, holes captured; sample points jittered 0.5007/0.4993 to dodge axis-aligned-edge
   double-counts) → `domain_mask` forces void OUTSIDE the part so the solver redesigns inside
@@ -262,12 +267,20 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
   applied on the LLM-free revision). Makes upload→constrain→redesign click-driven. Codex-reviewed:
   3 fixes — sync GLV tool on stage rebuild, reset geometry on `mount()` (no stale-mesh pick during
   load), exclude pan gestures (`!drag.pan`) from picking. Verified live (top→solid, floor→preserve).
+- **3D load vectors:** the same toolbar now has a Load mode with numeric X/Y/Z direction fields.
+  Clicking the model replaces the lone provisional/default load, then adds or updates further
+  loads by face. The exact flood-picked triangle patch is carried through recipe state and server
+  sanitization; `topo.py` rasterizes it to loaded domain elements/nodes instead of relying on a
+  fragile thin AABB. Load patches highlight warm red; direction magnitude is normalized. Recipe
+  editing exposes the same numeric vector and supports removing loads. Verified live with an exact
+  52-triangle face patch and `[1,2,-3]`, plus a solver run using triangle-defined load nodes.
 - **Cleanup:** trashed the demo/test jobs to ~/.Trash (upl-*, t-ok, smoke-frame, bones-demo-r6/r7),
   killed a 37h-wedged agentcad process.
-- **Mesh detail (sub-voxel smoothing):** the plain-solid final mesh (and the live previews) now
-  march the CONTINUOUS filtered density UPSAMPLED `mesh_detail`× (trilinear + a light Gaussian
-  σ≈0.7 coarse-voxel), NOT the binary x≥0.5 staircase — recovering the sub-voxel gradient the
-  density filter computed. The Gaussian removes grid-aligned RIBBING (trilinear zoom is only C0
+- **Mesh detail (sub-voxel smoothing):** live previews march the CONTINUOUS filtered density;
+  final meshes use the volume-aware connected binary projection UPSAMPLED `mesh_detail`×
+  (trilinear + a light Gaussian σ≈0.45 coarse-voxel). The old final x≥0.5 marching level erased
+  valid low-budget paths whose useful densities were all below 0.5. The Gaussian removes
+  grid-aligned RIBBING (trilinear zoom is only C0
   across coarse cells → marching-cubes creases; the box sensitivity filter adds grid stepping) —
   confirmed via an A/B render (concentric grid bands → clean), structure/compliance unchanged. Surface smoothness is
   DECOUPLED from the coarse solve grid (a fine mesh from a coarse solve; structure unchanged, only
@@ -278,6 +291,41 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
   `x.max(axis=1)` imshow'd, never fed forward. Verified: detail 1→3 on a cantilever went from heavy
   staircase to smooth, all watertight (20k→188k tris), same compliance/topology.
   Repo (branch main), local-only (no remote).
+
+## DONE 2026-07-09: progressive, load-path-first generative solve
+- **No iteration-1 demolition:** SIMP starts from the intact uploaded domain at 100% and uses
+  smooth continuation for both free-region material (100%→requested) and penalization (1→style
+  target) over the first ~45% of the run. Uploaded iteration 1 renders the exact welded source
+  surface. Creativity seeds bias sensitivity rather than corrupting the intact start.
+- **Independent vector load cases:** every authored 3D load is a separate RHS solved against the
+  same stiffness matrix; element strain energies are summed. Opposing or angled loads can no
+  longer cancel by being added into one force vector. Exact clicked triangle patches still define
+  the loaded nodes.
+- **Zones budgeted correctly:** solid, preserve, support, and load interface pads are passive
+  material excluded from the free-region volume constraint. Loads/supports get a one-cell
+  non-design transfer band. Preserve face patches remain a surface shell instead of being
+  accidentally dilated into a huge passive slab. UI/result metrics distinguish total material,
+  free-region material, passive fraction, and independent load-case count.
+- **One preview/export surface contract:** once continuation reaches its target, live frames use
+  the same production surface pipeline as the final STL. A stable last iterate wins when it is
+  within 2% compliance of the historical best; only a materially degraded tail reverts to the
+  best state, which late frames already display as `best N`. If the continuous preview is already
+  one load-connected component, it is exported unchanged (`continuous-density`). Otherwise the
+  visible late frames and final both use the same `projected` repair: volume-ranked density plus a
+  density-weighted load-to-support path and connected high-density growth. Thus finalization never
+  introduces an unseen mesh conversion. Structural continuity may explicitly exceed a requested
+  target; it is logged rather than silently sacrificing the load path.
+- **Verified on the uploaded 13135A59 bracket:** Balanced 25×26×25 at 10% free material starts
+  at the exact original, finishes at 10.17% free / 34.84% total (the broad provisional faces are
+  passive), one component, watertight; six voxels closed the projected load path. A second run
+  with two non-collinear loads plus solid+preserve zones converged to 20.0% free material, two
+  independent cases, one component, watertight, with final compliance 66.93.
+- **Final-delta regression (2026-07-10):** replayed the exact reported r3 config (25×26×25,
+  20%, 90 iterations). Iteration 90 is selected over best iteration 78 because its compliance is
+  only 0.54% higher; final mode is `continuous-density`, one component/watertight, and the
+  iteration-90/final geometry crops are pixel-identical (zero changed pixels). Replayed the 10%
+  disconnected case too: late frames visibly show projected best iteration 25, final uses the
+  same projection, and their geometry crops are also pixel-identical.
 
 ## PENDING — leftover
 Parametric "measured lock rows" from the guided finalize flow are only partially served
@@ -301,14 +349,14 @@ Two orthogonal axes from Quality (Quality=depth of ONE result; Creativity=breadt
 Creativity = generate a GALLERY of divergent variants:
 - **Axis 1 (interpretation):** LLM proposes 2–3 DISTINCT concepts of the brief (e.g. table →
   pedestal / four-leg / cantilever) = different load cases.
-- **Axis 2 (solution diversity):** exploit SIMP non-convexity — perturbed initial density
+- **Axis 2 (solution diversity):** exploit SIMP non-convexity — seeded sensitivity bias
   (random/asymmetric SEED), jittered load/support boxes, varied penal/rmin → different valid
   local optima for the SAME concept.
 Levels: Focused(1 deterministic) → Explore(2–3 concepts) → Wild(concepts × seeds = 6–9).
 Present variants as siblings in the tree (reuse revision-tree UI) with each variant's
 COMPLIANCE shown (creativity trades against optimality — show the cost). Fan-out in the job
 runner. Needs: topo.py accept a `seed`/`asymmetry` param (np.random seeded, reproducible) +
-initial-density perturbation; server fan-out that spawns N variant jobs; confirm-gate
+  sensitivity perturbation; server fan-out that spawns N variant jobs; confirm-gate
 "Explore" control (2 sliders: Quality, Creativity). NOTE: creativity ≠ bonier (that's Quality).
 
 ### C. Leftover proposal slices 7–14 (some partially done in the rebuild)
