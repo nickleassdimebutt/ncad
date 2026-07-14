@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Create or verify the nCAD Python environments.
+set -euo pipefail
+
+usage() {
+  printf 'usage: %s [--check] [--recreate]\n' "$0" >&2
+}
+
+CHECK=0
+RECREATE=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check) CHECK=1 ;;
+    --recreate) RECREATE=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 2 ;;
+  esac
+  shift
+done
+
+resolve_app_dir() {
+  local src="${BASH_SOURCE[0]:-$0}"
+  while [ -L "$src" ]; do
+    local dir link
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *) src="$dir/$link" ;;
+    esac
+  done
+  cd -P "$(dirname "$src")/.." && pwd
+}
+
+APP_DIR="${NCAD_APP_DIR:-$(resolve_app_dir)}"
+CAD_ROOT="${NCAD_CAD_ROOT:-$HOME/Documents/CAD}"
+ENGINE_VENV="${NCAD_ENGINE_VENV:-$CAD_ROOT/.venv}"
+SOLVER_VENV="${NCAD_SOLVER_VENV:-$APP_DIR/.venv}"
+PYTHON_VERSION="${NCAD_PYTHON_VERSION:-3.12}"
+UV="${UV:-uv}"
+
+venv_python() {
+  printf '%s/bin/python' "$1"
+}
+
+venv_tool() {
+  printf '%s/bin/%s' "$1" "$2"
+}
+
+check_envs() {
+  local engine_python solver_python agentcad
+  engine_python="$(venv_python "$ENGINE_VENV")"
+  solver_python="$(venv_python "$SOLVER_VENV")"
+  agentcad="$(venv_tool "$ENGINE_VENV" agentcad)"
+  [ -x "$engine_python" ] || return 1
+  [ -x "$solver_python" ] || return 1
+  [ -x "$agentcad" ] || return 1
+  "$engine_python" -c 'import agentcad, build123d' >/dev/null
+  "$solver_python" -c 'import numpy, scipy, skimage, matplotlib' >/dev/null
+}
+
+if [ "$CHECK" -eq 1 ]; then
+  check_envs
+  exit 0
+fi
+
+if ! command -v "$UV" >/dev/null 2>&1; then
+  printf 'nCAD: uv is required to bootstrap Python environments. Install uv first.\n' >&2
+  exit 1
+fi
+
+mkdir -p "$CAD_ROOT"
+
+if [ "$RECREATE" -eq 1 ]; then
+  rm -rf "$ENGINE_VENV" "$SOLVER_VENV"
+fi
+
+ensure_venv() {
+  local venv="$1" prompt="$2"
+  if [ ! -x "$(venv_python "$venv")" ]; then
+    "$UV" venv --python "$PYTHON_VERSION" --prompt "$prompt" "$venv"
+  fi
+}
+
+install_reqs() {
+  local venv="$1" requirements="$2"
+  "$UV" pip install --python "$(venv_python "$venv")" -r "$requirements"
+}
+
+printf 'nCAD: using app dir %s\n' "$APP_DIR"
+printf 'nCAD: using CAD root %s\n' "$CAD_ROOT"
+
+ensure_venv "$ENGINE_VENV" nCAD-engine
+install_reqs "$ENGINE_VENV" "$APP_DIR/requirements-engine.txt"
+
+ensure_venv "$SOLVER_VENV" nCAD-solver
+install_reqs "$SOLVER_VENV" "$APP_DIR/requirements-solver.txt"
+
+if ! install_reqs "$SOLVER_VENV" "$APP_DIR/requirements-solver-optional.txt"; then
+  printf 'nCAD: optional scikit-sparse install failed; scipy fallback will be used.\n' >&2
+fi
+
+check_envs
+printf 'nCAD: bootstrap complete.\n'

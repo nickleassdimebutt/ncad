@@ -1,4 +1,4 @@
-# genloop template: rectangular plate with optional fillets, center bore,
+# nCAD template: rectangular plate with optional fillets, center bore,
 # and a polar or grid hole pattern. All scalars overridable via --params.
 length = 60.0
 width = 40.0

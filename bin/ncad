@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Start nCAD if needed, then open its local web UI.
+set -euo pipefail
+
+resolve_app_dir() {
+  local src="${BASH_SOURCE[0]:-$0}"
+  while [ -L "$src" ]; do
+    local dir link
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *) src="$dir/$link" ;;
+    esac
+  done
+  cd -P "$(dirname "$src")/.." && pwd
+}
+
+APP_DIR="${NCAD_APP_DIR:-$(resolve_app_dir)}"
+CAD_ROOT="${NCAD_CAD_ROOT:-$HOME/Documents/CAD}"
+ENGINE_VENV="${NCAD_ENGINE_VENV:-$CAD_ROOT/.venv}"
+SOLVER_VENV="${NCAD_SOLVER_VENV:-$APP_DIR/.venv}"
+HOST="${NCAD_HOST:-127.0.0.1}"
+PORT="${NCAD_PORT:-8765}"
+URL="http://$HOST:$PORT"
+PY="$ENGINE_VENV/bin/python"
+SERVER="$APP_DIR/server.py"
+LOG="${NCAD_LOG:-$APP_DIR/server.log}"
+
+if ! "$APP_DIR/bin/bootstrap" --check >/dev/null 2>&1; then
+  printf 'nCAD: Python environments need setup; running bootstrap...\n'
+  "$APP_DIR/bin/bootstrap"
+fi
+
+if ! curl -s --max-time 2 "$URL/api/jobs" >/dev/null 2>&1; then
+  printf 'nCAD: starting server...\n'
+  mkdir -p "$CAD_ROOT"
+  NCAD_APP_DIR="$APP_DIR" NCAD_CAD_ROOT="$CAD_ROOT" NCAD_ENGINE_VENV="$ENGINE_VENV" \
+    NCAD_SOLVER_VENV="$SOLVER_VENV" NCAD_HOST="$HOST" NCAD_PORT="$PORT" \
+    "$PY" - "$PY" "$SERVER" "$LOG" <<'PY'
+import os
+import subprocess
+import sys
+
+python, server, log = sys.argv[1:]
+log_dir = os.path.dirname(log)
+if log_dir:
+    os.makedirs(log_dir, exist_ok=True)
+log_file = open(log, "ab", buffering=0)
+subprocess.Popen([python, server],
+                 cwd=os.path.dirname(server) or None,
+                 stdin=subprocess.DEVNULL,
+                 stdout=log_file,
+                 stderr=log_file,
+                 env=os.environ.copy(),
+                 start_new_session=True)
+PY
+  for _ in $(seq 1 30); do
+    sleep 0.5
+    curl -s --max-time 2 "$URL/api/jobs" >/dev/null 2>&1 && break
+  done
+  curl -s --max-time 2 "$URL/api/jobs" >/dev/null 2>&1 || {
+    printf 'nCAD: server failed to start; see %s\n' "$LOG" >&2
+    exit 1
+  }
+fi
+
+printf 'nCAD: %s\n' "$URL"
+if command -v open >/dev/null 2>&1; then
+  open "$URL"
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$URL" >/dev/null 2>&1 &
+else
+  printf 'nCAD: open this URL in your browser: %s\n' "$URL"
+fi

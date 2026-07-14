@@ -1,4 +1,20 @@
 {
+  "sphere_solid": {
+    "description": "Solid sphere/ball/orb with a single diameter parameter.",
+    "bbox_map": { "x": "diameter", "y": "diameter", "z": "diameter" },
+    "params": {
+      "diameter": { "default": 50, "min": 1, "max": 500 }
+    }
+  },
+  "pyramid_solid": {
+    "description": "Solid pyramid with a rectangular base and four triangular faces meeting at one centered apex.",
+    "bbox_map": { "x": "base_x", "y": "base_y", "z": "height" },
+    "params": {
+      "base_x": { "default": 100, "min": 1, "max": 1000 },
+      "base_y": { "default": 100, "min": 1, "max": 1000 },
+      "height": { "default": 80, "min": 1, "max": 1000 }
+    }
+  },
   "plate_holes": {
     "description": "Rectangular plate with optional corner fillets, an optional center bore, and one hole pattern (polar bolt-circle or rectangular grid).",
     "bbox_map": { "x": "length", "y": "width", "z": "thickness" },
