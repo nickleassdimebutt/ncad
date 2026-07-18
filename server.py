@@ -100,6 +100,8 @@ BUILD_TIMEOUT_S = 5 * 60
 JOB_WALL_CLOCK_S = 2 * 60 * 60
 MAX_ITERS_CAP = 8
 RESERVED_PROJECT_DIRS = {".venv", "genloop", "ncad", APP_DIR.name.lower()}
+ACTIVE_STATES = ("configuring", "generating", "building", "verifying", "optimizing")
+RUNNING_STATES = ("queued",) + ACTIVE_STATES
 
 JOBS = {}          # job_id -> job dict
 JOB_ORDER = []     # queue of job_ids for the single worker
@@ -142,7 +144,6 @@ def new_job(payload):
         "features": features,
         "objective": str(payload.get("objective") or "").strip()[:400],
         "max_iters": max(1, min(MAX_ITERS_CAP, int(payload.get("max_iters") or 3))),
-        "model": payload.get("model") if payload.get("model") in ("local-qwen", "local-gemma") else "auto",
         "generator": payload.get("generator") if payload.get("generator") in ("stack", "structural", "llm-direct", "mock") else "stack",
         # structural knobs (quality = mesh/iters depth; creativity = variant breadth)
         "quality": payload.get("quality") if payload.get("quality") in QUALITY_PRESETS else DEFAULT_QUALITY,
@@ -182,7 +183,7 @@ def save_job(job):
 
 REQUIRED_JOB_KEYS = {"id", "name", "state", "iterations", "log", "created", "updated",
                      "brief", "bbox", "bbox_tol", "features", "objective",
-                     "max_iters", "model", "generator", "cancel"}
+                     "max_iters", "generator", "cancel"}
 
 
 def load_jobs():
@@ -193,7 +194,7 @@ def load_jobs():
             continue
         if not isinstance(job, dict) or not REQUIRED_JOB_KEYS.issubset(job):
             continue    # foreign/hand-made job.json (e.g. written by a TUI model)
-        if job.get("state") in ("queued", "configuring", "generating", "building", "verifying", "optimizing"):
+        if job.get("state") in RUNNING_STATES:
             job["state"] = "failed"
             job["log"].append("[restart] server restarted mid-run; job marked failed")
         JOBS[job["id"]] = job
@@ -325,7 +326,7 @@ def semantic_source_review(job, src):
         '"missing":{"<key>":"<short reason>"}}',
     ])
     try:
-        text, _model = chat_json(job, "You are a strict CAD implementation auditor. "
+        text, _model = chat_json("You are a strict CAD implementation auditor. "
                                  "Never credit a feature without exact code evidence.",
                                  user, max_tokens=1800)
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
@@ -497,16 +498,12 @@ def lmstudio_unavailable(exc):
         f"({reason})")
 
 
-def loaded_model(pref):
-    """Which chat model is loaded in LM Studio; honor a local-qwen/gemma pref."""
+def loaded_model():
+    """First chat model loaded in LM Studio."""
     data = lmstudio_models()
     loaded = [m["id"] for m in data.get("data", [])
               if m.get("state") == "loaded" and m.get("type") != "embeddings"]
-    want = {"local-qwen": "qwen", "local-gemma": "gemma"}.get(pref)
-    for mid in loaded:
-        if not want or want in mid.lower():
-            return mid
-    return None if want else (loaded[0] if loaded else None)
+    return loaded[0] if loaded else None
 
 
 def extract_code(text):
@@ -550,14 +547,13 @@ def repair_display_call(job, src):
         "and no unambiguous final shape variable; nCAD stopped before build")
 
 
-def chat(job, system, user, max_tokens=6000, tools=None, tool_choice=None,
+def chat(system, user, max_tokens=6000, tools=None, tool_choice=None,
          tool_name=None, tool_result_key=None):
     """One chat completion against LM Studio. Returns (text, model_id)."""
-    model = loaded_model(job["model"])
+    model = loaded_model()
     if not model:
-        raise RuntimeError("LM Studio is reachable, but no chat model is loaded. Load a chat model and resubmit"
-                           if job["model"] == "auto"
-                           else f"requested model '{job['model']}' is not loaded in LM Studio")
+        raise RuntimeError("LM Studio is reachable, but no chat model is loaded. "
+                           "Load a chat model and resubmit")
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": system},
@@ -614,7 +610,7 @@ def chat(job, system, user, max_tokens=6000, tools=None, tool_choice=None,
         "nCAD stopped before build instead of spending another iteration.")
 
 
-def chat_json(job, system, user, max_tokens=3000):
+def chat_json(system, user, max_tokens=3000):
     """Force reasoning/agentic models to hand back their final JSON structurally."""
     submit_json = {
         "type": "function",
@@ -629,12 +625,12 @@ def chat_json(job, system, user, max_tokens=3000):
             },
         },
     }
-    return chat(job, system + " Call submit_json exactly once with the final JSON.",
+    return chat(system + " Call submit_json exactly once with the final JSON.",
                 user, max_tokens=max_tokens, tools=[submit_json], tool_choice="required",
                 tool_name="submit_json", tool_result_key="json")
 
 
-def generate_direct(job, prompt):
+def generate_direct(prompt):
     submit_design = {
         "type": "function",
         "function": {
@@ -649,7 +645,6 @@ def generate_direct(job, prompt):
         },
     }
     text, model = chat(
-        job,
         "You write build123d CAD scripts. Call submit_design exactly once with the complete "
         "Python source of design.py. Do not explain and do not omit the final show call.",
         prompt, tools=[submit_design], tool_choice="required",
@@ -699,10 +694,6 @@ CREATIVITY_PRESETS = {
     "wild":    {"concepts": 3, "seeds": 2, "label": "Wild"},
 }
 DEFAULT_CREATIVITY = "focused"
-
-
-def quality_preset(q):
-    return QUALITY_PRESETS.get(str(q or ""), QUALITY_PRESETS[DEFAULT_QUALITY])
 
 
 def creativity_preset(c):
@@ -813,7 +804,7 @@ def llm_structural_config(job, feedback=None):
     ])
     last_exc = None
     for attempt in (1, 2):
-        text, model = chat_json(job, "You configure structural FEA boundary conditions. "
+        text, model = chat_json("You configure structural FEA boundary conditions. "
                                 "Output ONLY valid JSON, no <think> block, no prose.",
                                 user, max_tokens=3000)
         stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
@@ -856,7 +847,7 @@ def llm_structural_variants(job, n):
         '[{"name":"<short>","supports":[{"box":[..6..]}],"loads":[{"box":[..6..],"dir":[dx,dy,dz]}],"volfrac":<0.15-0.5>}, ...]',
     ])
     for attempt in (1, 2):
-        text, model = chat_json(job, "You propose diverse structural FEA load cases. "
+        text, model = chat_json("You propose diverse structural FEA load cases. "
                                 "Output ONLY a JSON array, no <think> block, no prose.",
                                 user, max_tokens=4000)
         stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
@@ -1461,11 +1452,6 @@ def load_styles():
     print(f"nCAD: {len(STYLES)} styles loaded", flush=True)
 
 
-def style_bundle(key):
-    """The validated bundle for a style key, or None."""
-    return STYLES.get(key) if key in STYLES else None
-
-
 def clamp_params(tname, params):
     """Keep only known params, clamped into their manifest bounds."""
     spec = TEMPLATES[tname]["params"]
@@ -1592,7 +1578,7 @@ def llm_config(job, feedback=None):
     last_exc = None
     for attempt in (1, 2):                       # one retry on malformed JSON
         text, model = chat_json(
-            job, "You configure parametric CAD templates. Reply with ONLY valid JSON.",
+            "You configure parametric CAD templates. Reply with ONLY valid JSON.",
             user, max_tokens=2000)
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
         m = re.search(r"\{.*\}", text, re.S)
@@ -1900,7 +1886,7 @@ def run_job(job):
         prev_src = (proj / "design.py").read_text() if (proj / "design.py").exists() else ""
         set_state(job, "generating")
         log(job, f"iteration {i}/{job['max_iters']}: generating "
-                 f"({'mock' if job['generator'] == 'mock' else 'hermes/' + job['model']})")
+                 f"({'mock' if job['generator'] == 'mock' else 'hermes'})")
         prompt = build_prompt(job, feedback, i, prev_src)
         (proj / f"prompt_iter{i}.txt").write_text(prompt)
 
@@ -1908,7 +1894,7 @@ def run_job(job):
             (proj / "design.py").write_text(mock_design(job))
         else:
             try:
-                code, model_used = generate_direct(job, prompt)
+                code, model_used = generate_direct(prompt)
                 (proj / "design.py").write_text(code)
                 log(job, f"model {model_used} returned {len(code)} chars")
             except ModelOutputError as exc:
@@ -2020,15 +2006,6 @@ def worker():
 # ----------------------------------------------- guided design sessions
 
 SESSIONS = {}   # session_id -> dict; in-memory (a session is one sitting)
-
-INTERVIEW_QUESTIONS = [
-    {"key": "interfaces", "q": "What are the important interfacing surfaces? "
-     "(what does this part touch, mount to, or mate with — and where)"},
-    {"key": "important", "q": "What aspects or features are most important? "
-     "(dimensions that must hold, load-bearing areas, alignment, finish)"},
-    {"key": "unimportant", "q": "What is NOT important? "
-     "(areas free to change, looks, exact wall thickness, etc.)"},
-]
 
 
 REFERENCE_PATTERNS = (
@@ -2336,7 +2313,7 @@ def unresolved_questions(session):
 
 
 def _clarification_text(session):
-    qs = {q["key"]: q["q"] for q in session.get("questions") or INTERVIEW_QUESTIONS}
+    qs = {q["key"]: q["q"] for q in session.get("questions") or []}
     answers = session.get("answers") or {}
     lines = [str(session.get("request") or "").strip()]
     for key, value in answers.items():
@@ -2357,9 +2334,7 @@ def _bbox_from_text(text):
                       r"\s*(mm|millimeters?|cm|centimeters?|in|inch(?:es)?|\")?", text, re.I)
     if not match:
         return {}
-    scale = {"cm": 10.0, "centimeter": 10.0, "centimeters": 10.0,
-             "in": 25.4, "inch": 25.4, "inches": 25.4, '"': 25.4}.get(
-                 (match.group(4) or "mm").lower(), 1.0)
+    scale = _unit_scale(match.group(4))
     return dict(zip("xyz", [round(float(match.group(i)) * scale, 4) for i in (1, 2, 3)]))
 
 
@@ -2543,9 +2518,8 @@ def clarified_fallback_spec(session):
 def synthesize_spec(session):
     """One LLM call: request + interview answers → a working spec the stack
     can execute. The LLM interprets; the numbers become hard gates."""
-    questions = session.get("questions") or INTERVIEW_QUESTIONS
     qa = "\n".join(f"Q: {q['q']}\nA: {session['answers'].get(q['key'], '(no answer)')}"
-                   for q in questions)
+                   for q in session.get("questions") or [])
     research = str(session.get("reference_context") or "").strip()
     sources = session.get("reference_sources") or []
     source_text = "\n".join(
@@ -2587,9 +2561,8 @@ def synthesize_spec(session):
         *[f"  {k} — {b.get('blurb','')} ({b.get('engine_affinity')})"
           for k, b in STYLES.items()],
     ])
-    fake_job = {"model": "auto"}
-    text, model = chat_json(fake_job, "You turn engineering conversations into CAD specs. "
-                                      "Reply with ONLY valid JSON.", user, max_tokens=2500)
+    text, model = chat_json("You turn engineering conversations into CAD specs. "
+                            "Reply with ONLY valid JSON.", user, max_tokens=2500)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
     m = re.search(r"\{.*\}", text, re.S)
     spec = json.loads(m.group()) if m else None
@@ -2632,33 +2605,6 @@ def synthesize_spec(session):
                               "mode": session.get("reference_mode") or "reference",
                               "warning": session.get("reference_warning") or ""}
     return clean, model
-
-
-def detected_features(session):
-    """Measure the rough pass's real geometry so the user can lock features."""
-    job = JOBS.get(session.get("rough_job_id"))
-    if not job:
-        return []
-    step = next((it.get("step") or it.get("stl") for it in reversed(job["iterations"])
-                 if it.get("step") or it.get("stl")), None)
-    if not step or not step.endswith(".step"):
-        return []
-    # plain subprocess — run_cmd would clobber the worker's ACTIVE cancel slot;
-    # short timeout so a session GET can't hang the browser poll for minutes
-    cp = subprocess.run([AGENTCAD, "measure", str(CAD_ROOT / step)],
-                        cwd=CAD_ROOT / job["name"], capture_output=True, text=True,
-                        timeout=60)
-    res = last_json(cp.stdout) or {}
-    feats = []
-    for f in res.get("cylindrical_features", []):
-        if 0.5 <= f.get("diameter_mm", 0) <= 200:
-            feats.append({"name": f"{f['count']}x hole dia {f['diameter_mm']} mm (axis {f.get('axis')})",
-                          "diameter_mm": f["diameter_mm"], "count": f["count"]})
-    dims = (res.get("metrics") or {}).get("dimensions")
-    if dims:
-        feats.insert(0, {"name": f"overall size {dims['x']} x {dims['y']} x {dims['z']} mm",
-                         "bbox": dims})
-    return feats
 
 
 def stl_bounds(path):
@@ -2704,8 +2650,7 @@ def submit_internal(payload):
     with LOCK:
         for jid, other in list(JOBS.items()):
             if other["name"] == job["name"]:
-                if other["state"] in ("queued", "configuring", "generating",
-                                      "building", "verifying", "optimizing"):
+                if other["state"] in RUNNING_STATES:
                     raise ValueError(f"project '{job['name']}' already has a running job")
                 del JOBS[jid]
         JOBS[job["id"]] = job
@@ -2763,9 +2708,7 @@ def note_http_activity():
 def work_in_progress():
     with LOCK:
         return bool(ACTIVE_JOB["id"] or JOB_ORDER or any(
-            j.get("state") in ("queued", "configuring", "generating", "building",
-                               "verifying", "optimizing")
-            for j in JOBS.values()))
+            j.get("state") in RUNNING_STATES for j in JOBS.values()))
 
 
 def stop_when_idle(httpd):
@@ -2781,6 +2724,9 @@ def stop_when_idle(httpd):
             return
 
 
+# the LaunchAgent (~/Library/LaunchAgents/com.nicksapiro.ncad.plist) socket-activates
+# this server: launchd owns the 8765 listener and hands it over on spawn. Binding
+# directly there would EADDRINUSE-crash-loop the service.
 def launchd_socket(name="Listener"):
     """Return a listening socket supplied by macOS launchd, when available."""
     if sys.platform != "darwin":
@@ -2831,7 +2777,7 @@ def public_job(job):
     with LOCK:
         snap = copy.deepcopy({k: job.get(k) for k in
                               ("id", "name", "state", "iterations", "brief", "bbox", "bbox_tol",
-                               "features", "objective", "max_iters", "model", "generator",
+                               "features", "objective", "max_iters", "generator",
                                "quality", "creativity", "style",
                                "created", "updated", "started", "root", "config")})
         snap["log"] = job["log"][-80:]
@@ -2889,28 +2835,6 @@ class Handler(BaseHTTPRequestHandler):
                           if aj else None)
                 queue = list(JOB_ORDER)
             return self._send(200, {"now": time.time(), "active": active, "queue": queue})
-        m = re.match(r"^/api/sessions/([0-9a-f]+)$", self.path)
-        if m:
-            with LOCK:
-                s = SESSIONS.get(m.group(1))
-                if not s:
-                    return self._send(404, {"error": "no such session"})
-                rough = JOBS.get(s.get("rough_job_id"))
-                rough_state = rough["state"] if rough else None
-                need_detect = (rough and rough_state in ("done", "failed")
-                               and "detected" not in s)
-            if need_detect:
-                try:
-                    det = detected_features(s)
-                except Exception:
-                    det = []
-                with LOCK:
-                    s["detected"] = det
-            with LOCK:
-                out = copy.deepcopy(s)
-            out["detected"] = out.get("detected", [])
-            out["rough_state"] = rough_state
-            return self._send(200, out)
         m = re.match(r"^/api/jobs/([0-9a-f]+)$", self.path)
         if m:
             job = JOBS.get(m.group(1))
@@ -3020,14 +2944,14 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 SESSIONS[sid] = {"id": sid, "name": name, "request": request_txt,
                                  "stage": "interview", "answers": {}, "spec": None,
-                                 "questions": INTERVIEW_QUESTIONS,
+                                 "questions": [],
                                  "reference_query": "", "reference_context": "",
                                  "reference_facts": {}, "reference_sources": [],
                                  "reference_mode": "", "reference_warning": "",
                                  "reference_error": "",
-                                 "rough_job_id": None, "final_job_id": None}
-            return self._send(201, {"id": sid, "questions": INTERVIEW_QUESTIONS})
-        m = re.match(r"^/api/sessions/([0-9a-f]+)/(answers|run|finalize)$", self.path)
+                                 "rough_job_id": None}
+            return self._send(201, {"id": sid})
+        m = re.match(r"^/api/sessions/([0-9a-f]+)/(answers|run)$", self.path)
         if m:
             with LOCK:
                 s = SESSIONS.get(m.group(1))
@@ -3145,46 +3069,6 @@ class Handler(BaseHTTPRequestHandler):
                                      "features": feats, "objective": objective}
                         s["rough_job_id"], s["stage"] = job["id"], "running"
                     return self._send(200, public_job(job))
-
-                # ---- finalize: locks become hard gates, relationships steer config
-                with LOCK:
-                    if s["stage"] == "final" and s.get("final_job_id"):
-                        return self._send(200, {"job_id": s["final_job_id"]})   # idempotent
-                    rough = JOBS.get(s.get("rough_job_id"))
-                    if s["stage"] != "rough" or not s.get("spec") or not rough \
-                            or rough["state"] not in ("done", "failed"):
-                        return self._send(409, {"error": "rough pass is not finished yet"})
-                    spec = copy.deepcopy(s["spec"])
-                    rough_gen = rough["generator"]
-                locks, rel = [], str(p.get("relationships") or "").strip()[:2000]
-                for l in (p.get("locks") or [])[:16]:
-                    if not isinstance(l, dict):
-                        continue
-                    try:
-                        d, c = float(l.get("diameter_mm") or 0), int(l.get("count") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    entry = {"name": str(l.get("name") or "locked")[:80]}
-                    if 0.1 <= d <= 500 and 1 <= c <= 64:
-                        entry.update(diameter_mm=d, count=c)
-                    locks.append(entry)
-                locked_feats = [{"name": f"locked_{i}", "diameter_mm": l["diameter_mm"],
-                                 "count": l["count"], "tolerance_mm": 0.05}
-                                for i, l in enumerate(locks) if "diameter_mm" in l]
-                brief = spec["brief"]
-                if locks:
-                    brief += " LOCKED FEATURES (must not change): " + \
-                        "; ".join(l["name"] for l in locks) + "."
-                if rel:
-                    brief += f" IMPORTANT RELATIONSHIPS BETWEEN FEATURES: {rel}"
-                job = submit_internal({
-                    "name": s["name"] + "-final", "brief": brief, "bbox": spec["bbox"],
-                    "features": locked_feats or spec["features"],
-                    "objective": spec["objective"], "generator": rough_gen,
-                })
-                with LOCK:
-                    s["final_job_id"], s["stage"] = job["id"], "final"
-                return self._send(200, {"job_id": job["id"]})
             except (ValueError, KeyError, json.JSONDecodeError) as exc:
                 return self._send(400, {"error": str(exc)})
             except Exception as exc:
@@ -3286,7 +3170,7 @@ class Handler(BaseHTTPRequestHandler):
             if not job:
                 return self._send(404, {"error": "no such job"})
             with LOCK:
-                if job["state"] in ("configuring", "generating", "building", "verifying", "optimizing"):
+                if job["state"] in ACTIVE_STATES:
                     return self._send(409, {"error": "job is running — cancel it first"})
                 if job["id"] in JOB_ORDER:
                     JOB_ORDER.remove(job["id"])
@@ -3330,7 +3214,7 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             for jid, other in list(JOBS.items()):
                 if other["name"] == job["name"]:
-                    if other["state"] in ("queued", "configuring", "generating", "building", "verifying", "optimizing"):
+                    if other["state"] in RUNNING_STATES:
                         return self._send(409, {"error": f"project '{job['name']}' already has a running job — cancel it first"})
                     del JOBS[jid]   # same project dir; keep only the newest job
             JOBS[job["id"]] = job

@@ -48,10 +48,10 @@ re-run → new job `<base>-rN`, nested under parent by explicit `root` id.
   active comes from `ACTIVE_JOB["id"]` (set by worker on dequeue — honest during init).
 - `POST /api/jobs` → create+queue (expert path). `POST /api/jobs/{id}/revise` {config} → new -rN job.
   `POST /api/jobs/{id}/cancel`.
-- Guided sessions: `POST /api/sessions` {name,request} → {id,questions}. `POST .../answers`
+- Guided sessions: `POST /api/sessions` {name,request} → {id}. `POST .../answers`
   {answers} → synthesize spec ONLY (stage 'drafted'), returns {spec,model}, does NOT run.
   `POST .../run` {engine?,bbox?,features?,objective?} → submits confirmed job (stage-gated:
-  requires 'drafted', idempotent, atomic 'submitting' claim). GET `/api/sessions/{id}`.
+  requires 'drafted', idempotent, atomic 'submitting' claim).
 - job.config shapes: structural `{engine:'structural',domain_mm:[x,y,z],volfrac,supports:[{box:[6]}],loads:[{box:[6],dir:[3]}]}`;
   stack `{engine:'stack',template,params:{...}}`. Boxes are NORMALIZED 0..1 [x0,y0,z0,x1,y1,z1].
   z is VERTICAL; gravity=[0,0,-1]; z-min=floor, z-max=top.
@@ -328,8 +328,8 @@ lightweight the rest → inspect by rotating in 3D. All offline, no new deps.
   same projection, and their geometry crops are also pixel-identical.
 
 ## PENDING — leftover
-Parametric "measured lock rows" from the guided finalize flow are only partially served
-(labels help); the session finalize path itself is unchanged. Consider: force a lighter
+The guided finalize flow (locks/relationships, GET session, detected_features) was removed
+as unreachable dead code — nothing ever set stage 'rough'. Consider: force a lighter
 quality during Wild fan-out so 6 solves don't cost 80 min at Fine (currently variants
 inherit the chosen quality). TPMS follow-ons if wanted: graded cell size (varies with a
 field), network-mode volume-fraction targeting, and a matplotlib-independent thumbnail
